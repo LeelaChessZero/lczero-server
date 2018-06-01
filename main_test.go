@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"db"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -12,15 +13,13 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"server/db"
 	"strings"
 	"testing"
 
+	"github.com/LeelaChessZero/lczero-client/src/client"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-
-	"client/http"
 )
 
 type StoreSuite struct {
