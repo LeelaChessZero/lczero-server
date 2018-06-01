@@ -59,7 +59,7 @@ go build main.go
 In `~/.bashrc`:
 ```
 export PATH=$PATH:/usr/lib/go-1.9/bin
-export GOPATH=~/go:~/leela-chess/go
+export GOPATH=~/go:~/lczero-server
 ```
 
 ### Run the Server
