@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"db"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"server/db"
 	"sort"
 	"strconv"
 	"strings"
@@ -210,7 +210,7 @@ func main() {
 	}
 	defer s.TryUnlock()
 
-	db.Init(true)
+	db.Init()
 	defer db.Close()
 
 	for compactGames() {

@@ -2,7 +2,7 @@ package main
 
 import (
 	"log"
-	"server/db"
+	"db"
 )
 
 func updateNetworkCounts() {

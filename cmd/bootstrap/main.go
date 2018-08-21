@@ -1,7 +1,7 @@
 package main
 
 import (
-	"server/db"
+	"db"
 )
 
 func main() {
