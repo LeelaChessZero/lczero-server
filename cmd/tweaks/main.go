@@ -51,8 +51,8 @@ func makeRunActive() {
 func newMatch() {
 	match := db.Match{
 		TrainingRunID: 1,
-		CandidateID:   237,
-		CurrentBestID: 316,
+		CandidateID:   390,
+		CurrentBestID: 482,
 		Done:          false,
 		GameCap:       400,
 		Parameters:    `["--tempdecay=10"]`,
@@ -118,12 +118,12 @@ func dumpPgns() {
 */
 
 func main() {
-	db.Init(true)
+	db.Init()
 	db.SetupDB()
 
 	// newRun()
 	// makeRunActive()
-	// newMatch()
+	newMatch()
 	// setTestOnly()
 	// updateNetworkCounts()
 	// updateMatchPassed()
