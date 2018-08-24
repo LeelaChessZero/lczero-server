@@ -327,6 +327,10 @@ func uploadGame(c *gin.Context) {
 		c.String(http.StatusBadRequest, "Invalid network_id")
 		return
 	}
+	resign_fp_threshold, err := strconv.ParseFloat(c.PostForm("fp_threshold"), 64)
+	if err != nil {
+		resign_fp_threshold = -1
+	}
 
 	var network db.Network
 	err = db.GetDB().Where("id = ?", network_id).First(&network).Error
@@ -353,11 +357,12 @@ func uploadGame(c *gin.Context) {
 
 	// Create new game
 	game := db.TrainingGame{
-		UserID:        user.ID,
-		TrainingRunID: training_run.ID,
-		NetworkID:     network.ID,
-		Version:       uint(version),
-		EngineVersion: c.PostForm("engineVersion"),
+		UserID:            user.ID,
+		TrainingRunID:     training_run.ID,
+		NetworkID:         network.ID,
+		Version:           uint(version),
+		EngineVersion:     c.PostForm("engineVersion"),
+		ResignFPThreshold: resign_fp_threshold,
 	}
 	err = db.GetDB().Create(&game).Error
 	if err != nil {
