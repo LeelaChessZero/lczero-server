@@ -102,6 +102,8 @@ type TrainingGame struct {
 	Compacted bool
 
 	EngineVersion string
+
+	ResignFPThreshold float64
 }
 
 type ServerData struct {
