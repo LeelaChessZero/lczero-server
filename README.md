@@ -76,6 +76,7 @@ go get github.com/gin-gonic/gin
 go get github.com/gin-contrib/multitemplate
 go get -u github.com/jinzhu/gorm
 go get github.com/lib/pq
+go get github.com/hashicorp/go-version
 go build main.go
 ```
 
