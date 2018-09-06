@@ -423,7 +423,7 @@ func cachedGetNetwork(c *gin.Context) {
 		if backup_location != "" {
 			c.Redirect(http.StatusMovedPermanently, backup_location+c.Query("sha"))
 		} else {
-			c.String(400, "Networking missing")
+			c.String(400, "Network missing")
 		}
 		return
 	}
