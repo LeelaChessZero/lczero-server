@@ -20,6 +20,7 @@ var Config struct {
 	URLs struct {
 		OnNewNetwork    []string
 		NetworkLocation string
+		BackupNetworkLocation string
 	}
 	Matches struct {
 		Games      int
