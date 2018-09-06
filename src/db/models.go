@@ -11,6 +11,7 @@ type User struct {
 
 	Username string
 	Password string
+	AssignedTrainingRunID uint
 }
 
 type TrainingRun struct {
@@ -23,6 +24,8 @@ type TrainingRun struct {
 	Description     string
 	TrainParameters string
 	Active          bool
+	LastNetwork     uint
+	LastGame        uint
 }
 
 type Network struct {
@@ -30,6 +33,8 @@ type Network struct {
 	CreatedAt time.Time
 
 	TrainingRunID uint
+	// Scoped to training run
+	NetworkNumber uint
 
 	Sha  string
 	Path string
@@ -96,6 +101,9 @@ type TrainingGame struct {
 	TrainingRunID uint
 	Network       Network
 	NetworkID     uint `gorm:"index"`
+
+	// Scoped to training run.
+	GameNumber uint
 
 	Version   uint
 	Path      string
