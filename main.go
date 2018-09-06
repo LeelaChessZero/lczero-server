@@ -418,10 +418,18 @@ func cachedGetNetwork(c *gin.Context) {
 		c.String(400, "Unknown network")
 		return
 	}
+	if _, err := os.Stat(network.Path); os.IsNotExist(err) {
+		backup_location := config.Config.URLs.BackupNetworkLocation
+		if backup_location != "" {
+			c.Redirect(http.StatusMovedPermanently, backup_location+c.Query("sha"))
+		} else {
+			c.String(400, "Networking missing")
+		}
+		return
+	}
 
 	// Serve the file
 	c.File(network.Path)
-	// c.Redirect(http.StatusMovedPermanently, "https://s3.amazonaws.com/lczero/" + network.Path)
 }
 
 func setBestNetwork(training_id uint, network_id uint) error {
