@@ -421,7 +421,7 @@ func cachedGetNetwork(c *gin.Context) {
 	if _, err := os.Stat(network.Path); os.IsNotExist(err) {
 		backup_location := config.Config.URLs.BackupNetworkLocation
 		if backup_location != "" {
-			c.Redirect(http.StatusMovedPermanently, backup_location+c.Query("sha"))
+			c.Redirect(http.StatusMovedPermanently, backup_location+c.Param("sha"))
 		} else {
 			c.String(400, "Network missing")
 		}
