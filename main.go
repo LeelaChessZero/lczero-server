@@ -960,7 +960,7 @@ func game(c *gin.Context) {
 		return
 	}
 
-	pgn, err := ioutil.ReadFile(fmt.Sprintf("pgns/run%d/%d.pgn", game.TrainingRunID, id))
+	pgn, err := ioutil.ReadFile(fmt.Sprintf("pgns/run%d/%d.pgn", game.TrainingRunID, game.GameNumber))
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
