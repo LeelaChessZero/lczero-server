@@ -717,13 +717,13 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 	elos := make(map[uint]float64)
 
 	var matches []db.Match
-	err := db.GetDB().Order("id").Find(&matches).Error
+	err := db.GetDB().Order("id").Where("training_run_id=?", trainingRunID).Find(&matches).Error
 	if err != nil {
 		return nil, elos, err
 	}
 
 	var networks []db.Network
-	err = db.GetDB().Order("id").Find(&networks).Error
+	err = db.GetDB().Order("id").Where("training_run_id=?", trainingRunID).Find(&networks).Error
 	if err != nil {
 		return nil, elos, err
 	}
@@ -743,9 +743,6 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 	var elo float64 = 0.0
 	var matchIdx int = 0
 	for _, network := range networks {
-		if network.TrainingRunID != trainingRunID {
-			continue
-		}
 		var sprt string = "???"
 		var best bool = false
 		for matchIdx < len(matches) && (matches[matchIdx].CandidateID == network.ID || matches[matchIdx].TestOnly) {
