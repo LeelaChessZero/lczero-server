@@ -100,7 +100,7 @@ func nextGame(c *gin.Context) {
 	}
 
 	var match []db.Match
-	err = db.GetDB().Preload("Candidate").Where("done=false and TrainingRunID = ?", trainingRun.ID).Limit(1).Find(&match).Error
+	err = db.GetDB().Preload("Candidate").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error 2")
@@ -960,7 +960,7 @@ func game(c *gin.Context) {
 		return
 	}
 
-	pgn, err := ioutil.ReadFile(fmt.Sprintf("pgns/run%d/%d.pgn", game.TrainingRunID, id))
+	pgn, err := ioutil.ReadFile(fmt.Sprintf("pgns/run%d/%d.pgn", game.TrainingRunID, game.GameNumber))
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
