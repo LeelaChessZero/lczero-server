@@ -24,6 +24,7 @@ import (
 	"github.com/gin-contrib/multitemplate"
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/go-version"
+	"github.com/jinzhu/gorm"
 )
 
 func checkUser(c *gin.Context) (*db.User, uint64, error) {
@@ -67,10 +68,22 @@ func nextGame(c *gin.Context) {
 		return
 	}
 
+	if user == nil {
+		c.String(http.StatusBadRequest, "User load or create failed.")
+		return
+	}
+
+	// TODO: support user arg to request to override assignment.
+	assignedID := user.AssignedTrainingRunID
+	// If not assigned, assign them to primary, which shall be assumed to be run 1.
+	if assignedID == 0 {
+		assignedID = 1
+	}
+
 	trainingRun := db.TrainingRun{
+		Model: gorm.Model{ID: assignedID,},
 		Active: true,
 	}
-	// TODO(gary): Only really supports one training run right now...
 	err = db.GetDB().Where(&trainingRun).First(&trainingRun).Error
 	if err != nil {
 		log.Println(err)
@@ -86,41 +99,39 @@ func nextGame(c *gin.Context) {
 		return
 	}
 
-	if user != nil {
-		var match []db.Match
-		err = db.GetDB().Preload("Candidate").Where("done=false").Limit(1).Find(&match).Error
+	var match []db.Match
+	err = db.GetDB().Preload("Candidate").Where("done=false and TrainingRunID = ?", trainingRun.ID).Limit(1).Find(&match).Error
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error 2")
+		return
+	}
+	if len(match) > 0 {
+		// Return this match
+		matchGame := db.MatchGame{
+			UserID:  user.ID,
+			MatchID: match[0].ID,
+		}
+		err = db.GetDB().Create(&matchGame).Error
+		// Note, this could cause an imbalance of white/black games for a particular match,
+		// but it's good enough for now.
+		flip := (matchGame.ID & 1) == 1
+		db.GetDB().Model(&matchGame).Update("flip", flip)
 		if err != nil {
 			log.Println(err)
-			c.String(500, "Internal error 2")
+			c.String(500, "Internal error 3")
 			return
 		}
-		if len(match) > 0 {
-			// Return this match
-			matchGame := db.MatchGame{
-				UserID:  user.ID,
-				MatchID: match[0].ID,
-			}
-			err = db.GetDB().Create(&matchGame).Error
-			// Note, this could cause an imbalance of white/black games for a particular match,
-			// but it's good enough for now.
-			flip := (matchGame.ID & 1) == 1
-			db.GetDB().Model(&matchGame).Update("flip", flip)
-			if err != nil {
-				log.Println(err)
-				c.String(500, "Internal error 3")
-				return
-			}
-			result := gin.H{
-				"type":         "match",
-				"matchGameId":  matchGame.ID,
-				"sha":          network.Sha,
-				"candidateSha": match[0].Candidate.Sha,
-				"params":       match[0].Parameters,
-				"flip":         flip,
-			}
-			c.JSON(http.StatusOK, result)
-			return
+		result := gin.H{
+			"type":         "match",
+			"matchGameId":  matchGame.ID,
+			"sha":          network.Sha,
+			"candidateSha": match[0].Candidate.Sha,
+			"params":       match[0].Parameters,
+			"flip":         flip,
 		}
+		c.JSON(http.StatusOK, result)
+		return
 	}
 
 	result := gin.H{
@@ -199,9 +210,31 @@ func uploadNetwork(c *gin.Context) {
 	}
 
 	// Create new network
-	// TODO(gary): Just hardcoding this for now.
-	var trainingRunID uint = 1
-	network.TrainingRunID = trainingRunID
+	trainingRunID, err := strconv.ParseUint(c.PostForm("training_id"), 10, 32)
+	// If not provided, assume its for the main run.
+	if err != nil || trainingRunID == 0 {
+		trainingRunID = 1
+	}
+	network.TrainingRunID = uint(trainingRunID)
+	trainingRun, err := getTrainingRun(uint(trainingRunID))
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return
+	}
+	// Atomic network display number increment and acquire.
+	rows, err := db.GetDB().Raw("WITH updated AS (UPDATE training_runs SET last_network = last_network + 1 WHERE id = ? RETURNING last_network) SELECT * FROM updated", uint(trainingRunID)).Rows()
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return	
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var nextNetworkNumber uint
+		rows.Scan(&nextNetworkNumber)
+		network.NetworkNumber = nextNetworkNumber
+	}
 	layers, err := strconv.ParseInt(c.PostForm("layers"), 10, 32)
 	network.Layers = int(layers)
 	filters, err := strconv.ParseInt(c.PostForm("filters"), 10, 32)
@@ -246,14 +279,8 @@ func uploadNetwork(c *gin.Context) {
 		}
 	}
 
-	// Create a match to see if this network is better
-	trainingRun, err := getTrainingRun(trainingRunID)
-	if err != nil {
-		log.Println(err)
-		c.String(500, "Internal error")
-		return
-	}
 
+	// Create a match to see if this network is better
 	params, err := json.Marshal(config.Config.Matches.Parameters)
 	if err != nil {
 		log.Println(err)
@@ -262,7 +289,7 @@ func uploadNetwork(c *gin.Context) {
 	}
 
 	match := db.Match{
-		TrainingRunID: trainingRunID,
+		TrainingRunID: uint(trainingRunID),
 		CandidateID:   network.ID,
 		CurrentBestID: trainingRun.BestNetworkID,
 		Done:          false,
@@ -355,6 +382,25 @@ func uploadGame(c *gin.Context) {
 		return
 	}
 
+	// Atomic network game run sequence number increment and acquire.
+	rows, err := db.GetDB().Raw("WITH updated AS (UPDATE training_runs SET last_game = last_game + 1 WHERE id = ? RETURNING last_game) SELECT * FROM updated", uint(training_id)).Rows()
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return	
+	}
+	var nextGameNumber uint
+	nextGameNumber = 0
+	defer rows.Close()
+	for rows.Next() {
+		rows.Scan(&nextGameNumber)
+	}
+	if nextGameNumber == 0 {
+		log.Println("Couldn't get a new game number.'")
+		c.String(500, "Internal error")
+		return	
+	}
+
 	// Create new game
 	game := db.TrainingGame{
 		UserID:            user.ID,
@@ -363,6 +409,7 @@ func uploadGame(c *gin.Context) {
 		Version:           uint(version),
 		EngineVersion:     c.PostForm("engineVersion"),
 		ResignFPThreshold: resign_fp_threshold,
+		GameNumber:        nextGameNumber,
 	}
 	err = db.GetDB().Create(&game).Error
 	if err != nil {
@@ -371,7 +418,7 @@ func uploadGame(c *gin.Context) {
 		return
 	}
 
-	err = db.GetDB().Model(&game).Update("path", filepath.Join("games", fmt.Sprintf("run%d/training.%d.gz", training_run.ID, game.ID))).Error
+	err = db.GetDB().Model(&game).Update("path", filepath.Join("games", fmt.Sprintf("run%d/training.%d.gz", training_run.ID, nextGameNumber))).Error
 	if err != nil {
 		log.Println(err)
 		c.String(http.StatusBadRequest, "Internal error")
@@ -388,7 +435,7 @@ func uploadGame(c *gin.Context) {
 	}
 
 	// Save pgn
-	pgn_path := fmt.Sprintf("pgns/run%d/%d.pgn", training_run.ID, game.ID)
+	pgn_path := fmt.Sprintf("pgns/run%d/%d.pgn", training_run.ID, nextGameNumber)
 	os.MkdirAll(filepath.Dir(pgn_path), os.ModePerm)
 	err = ioutil.WriteFile(pgn_path, []byte(c.PostForm("pgn")), 0644)
 	if err != nil {
@@ -666,7 +713,7 @@ func calcEloError(wins, losses, draws int) float64 {
 	return error
 }
 
-func getProgress() ([]gin.H, map[uint]float64, error) {
+func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 	elos := make(map[uint]float64)
 
 	var matches []db.Match
@@ -696,6 +743,9 @@ func getProgress() ([]gin.H, map[uint]float64, error) {
 	var elo float64 = 0.0
 	var matchIdx int = 0
 	for _, network := range networks {
+		if network.TrainingRunID != trainingRunID {
+			continue
+		}
 		var sprt string = "???"
 		var best bool = false
 		for matchIdx < len(matches) && (matches[matchIdx].CandidateID == network.ID || matches[matchIdx].TestOnly) {
@@ -809,7 +859,8 @@ func frontPage(c *gin.Context) {
 		return
 	}
 
-	progress, _, err := getProgress()
+	// TODO: support showing other runs progress graph on front page?
+	progress, _, err := getProgress(1)
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
@@ -819,8 +870,11 @@ func frontPage(c *gin.Context) {
 		progress = filterProgress(progress)
 	}
 
-	network := db.Network{}
-	err = db.GetDB().Last(&network).Error
+	// TODO: support showing other runs progress bar on front page?
+	network := db.Network{
+		TrainingRunID: 1,
+	}
+	err = db.GetDB().Where(&network).Last(&network).Error
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
@@ -950,34 +1004,44 @@ func getNetworkCounts(networks []db.Network) map[uint]uint64 {
 }
 
 func viewNetworks(c *gin.Context) {
-	// TODO(gary): Whole thing needs to take training_run into account...
 	var networks []db.Network
 	err := db.GetDB().Order("id desc").Find(&networks).Error
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
 		return
-	}
-
-	_, elos, err := getProgress()
-	if err != nil {
-		log.Println(err)
-		c.String(500, "Internal error")
-		return
+	}	
+	allElos :=  make(map[uint]float64)
+	trainingRunIDs := make(map[uint]bool)
+	for _, network := range networks {
+		if !trainingRunIDs[network.TrainingRunID] {
+			trainingRunIDs[network.TrainingRunID] = true
+			_, elos, err := getProgress(network.TrainingRunID)
+			if err != nil {
+				log.Println(err)
+				c.String(500, "Internal error")
+				return
+			}
+			for k, v := range elos {
+				allElos[k] = v
+			}
+		}
 	}
 
 	counts := getNetworkCounts(networks)
 	json := []gin.H{}
 	for _, network := range networks {
 		json = append(json, gin.H{
-			"id":         network.ID,
-			"elo":        fmt.Sprintf("%.2f", elos[network.ID]),
-			"games":      counts[network.ID],
-			"sha":        network.Sha,
-			"short_sha":  network.Sha[0:8],
-			"blocks":     network.Layers,
-			"filters":    network.Filters,
-			"created_at": network.CreatedAt,
+			"id":          network.ID,
+			"number":      network.NetworkNumber,
+			"training_id": network.TrainingRunID,
+			"elo":         fmt.Sprintf("%.2f", allElos[network.ID]),
+			"games":       counts[network.ID],
+			"sha":         network.Sha,
+			"short_sha":   network.Sha[0:8],
+			"blocks":      network.Layers,
+			"filters":     network.Filters,
+			"created_at":  network.CreatedAt,
 		})
 	}
 
@@ -1012,6 +1076,7 @@ func viewTrainingRuns(c *gin.Context) {
 }
 
 func viewStats(c *gin.Context) {
+	// TODO: should this be 3 nets per training run?
 	var networks []db.Network
 	err := db.GetDB().Order("id desc").Where("games_played > 0").Limit(3).Find(&networks).Error
 	if err != nil {
@@ -1065,8 +1130,10 @@ func viewMatches(c *gin.Context) {
 		if match.TestOnly {
 			passed = "test"
 		}
+		// TODO: show run network numbers instead of network ids.
 		json = append(json, gin.H{
 			"id":           match.ID,
+			"training_id":  match.TrainingRunID,
 			"current_id":   match.CurrentBestID,
 			"candidate_id": match.CandidateID,
 			"score":        fmt.Sprintf("+%d -%d =%d", match.Wins, match.Losses, match.Draws),
