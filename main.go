@@ -1002,7 +1002,13 @@ func getNetworkCounts(networks []db.Network) map[uint]uint64 {
 
 func viewNetworks(c *gin.Context) {
 	var networks []db.Network
-	err := db.GetDB().Order("id desc").Find(&networks).Error
+	var err error
+	run := c.Param("run")
+	if run == "" {
+		err = db.GetDB().Order("id desc").Find(&networks).Error
+	} else {
+		err = db.GetDB().Order("id desc").Where("TrainingRunID = ?", run).Find(&networks).Error
+	}
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
@@ -1266,7 +1272,7 @@ func setupRouter() *gin.Engine {
 	router.GET("/cached/network/sha/:sha", cachedGetNetwork)
 	router.GET("/user/:name", user)
 	router.GET("/game/:id", game)
-	router.GET("/networks", viewNetworks)
+	router.GET("/networks/*run", viewNetworks)
 	router.GET("/stats", viewStats)
 	router.GET("/training_runs", viewTrainingRuns)
 	router.GET("/match/:id", viewMatch)
@@ -1278,6 +1284,7 @@ func setupRouter() *gin.Engine {
 	router.POST("/upload_game", uploadGame)
 	router.POST("/upload_network", uploadNetwork)
 	router.POST("/match_result", matchResult)
+	router.POST("/training_run/:run", viewNetworks)
 	return router
 }
 
