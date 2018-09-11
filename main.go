@@ -1109,7 +1109,14 @@ func viewStats(c *gin.Context) {
 
 func viewMatches(c *gin.Context) {
 	var matches []db.Match
-	err := db.GetDB().Order("id desc").Find(&matches).Error
+	var err error
+	run := c.Param("run")
+	run = strings.TrimPrefix(run, "/")
+	if run == "" {
+		err = db.GetDB().Order("id desc").Find(&matches).Error
+	} else {
+		err = db.GetDB().Order("id desc").Where("training_run_id = ?", run).Find(&matches).Error
+	}
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
@@ -1285,7 +1292,7 @@ func setupRouter() *gin.Engine {
 	router.GET("/training_runs", viewTrainingRuns)
 	router.GET("/training_run/:run", viewNetworks)
 	router.GET("/match/:id", viewMatch)
-	router.GET("/matches", viewMatches)
+	router.GET("/matches/*run", viewMatches)
 	router.GET("/active_users", viewActiveUsers)
 	router.GET("/match_game/:id", viewMatchGame)
 	router.GET("/training_data", viewTrainingData)
