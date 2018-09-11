@@ -960,7 +960,11 @@ func game(c *gin.Context) {
 	pgn, err := ioutil.ReadFile(fmt.Sprintf("pgns/run%d/%d.pgn", game.TrainingRunID, game.GameNumber))
 	if err != nil {
 		log.Println(err)
-		c.String(500, "Internal error")
+		if os.IsNotExist(err) {
+			c.Redirect(http.StatusMovedPermanently, "/match_moved")
+		} else {
+			c.String(500, "Internal error")
+		}
 		return
 	}
 
@@ -1256,6 +1260,7 @@ func createTemplates() multitemplate.Render {
 	r.AddFromFiles("matches", "templates/base.tmpl", "templates/matches.tmpl")
 	r.AddFromFiles("training_data", "templates/base.tmpl", "templates/training_data.tmpl")
 	r.AddFromFiles("active_users", "templates/base.tmpl", "templates/active_users.tmpl")
+	r.AddFromFiles("match_moved", "templates/base.tmpl", "templates/match_moved.tmpl")
 	return r
 }
 
@@ -1280,6 +1285,7 @@ func setupRouter() *gin.Engine {
 	router.GET("/active_users", viewActiveUsers)
 	router.GET("/match_game/:id", viewMatchGame)
 	router.GET("/training_data", viewTrainingData)
+	router.GET("/match_moved", func(c *gin.Context) {c.HTML(http.StatusOK, "match_moved", nil)})
 	router.POST("/next_game", nextGame)
 	router.POST("/upload_game", uploadGame)
 	router.POST("/upload_network", uploadNetwork)
