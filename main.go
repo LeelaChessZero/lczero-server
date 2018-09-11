@@ -612,11 +612,11 @@ func matchResult(c *gin.Context) {
 }
 
 func getActiveUsers(userLimit int) (gin.H, error) {
-	rows, err := db.GetDB().Raw(`SELECT user_id, username, MAX(version), MAX(SPLIT_PART(engine_version, '.', 2) :: INTEGER), MAX(training_games.created_at), count(*) FROM training_games
+	rows, err := db.GetDB().Raw(`SELECT user_id, username, MAX(version), MAX(SPLIT_PART(engine_version, '.', 2) :: INTEGER), MAX(training_games.created_at), count(*), assigned_training_run_id FROM training_games
 LEFT JOIN users
 ON users.id = training_games.user_id
 WHERE training_games.created_at >= now() - INTERVAL '1 day'
-GROUP BY user_id, username
+GROUP BY user_id, username, assigned_training_run_id
 ORDER BY count DESC`).Rows()
 	if err != nil {
 		return nil, err
@@ -633,7 +633,8 @@ ORDER BY count DESC`).Rows()
 		var engine_version string
 		var created_at time.Time
 		var count uint64
-		rows.Scan(&user_id, &username, &version, &engine_version, &created_at, &count)
+		var assigned_training_run_id uint
+		rows.Scan(&user_id, &username, &version, &engine_version, &created_at, &count, &assigned_training_run_id)
 
 		active_users += 1
 		games_played += int(count)
@@ -650,6 +651,7 @@ ORDER BY count DESC`).Rows()
 				"version":      version,
 				"engine":       engine_version,
 				"last_updated": created_at,
+				"assigned_training_run_id": assigned_training_run_id,
 			})
 		}
 	}
@@ -900,7 +902,7 @@ func frontPage(c *gin.Context) {
 		"top_users":       topUsers,
 		"progress":        progress,
 		"train_percent":   trainPercent,
-		"progress_info":   fmt.Sprintf("%d/40000", network.GamesPlayed),
+		"progress_info":   fmt.Sprintf("%d/32000", network.GamesPlayed),
 	})
 }
 
@@ -1008,10 +1010,11 @@ func viewNetworks(c *gin.Context) {
 	var networks []db.Network
 	var err error
 	run := c.Param("run")
+	run = strings.TrimPrefix(run, "/")
 	if run == "" {
 		err = db.GetDB().Order("id desc").Find(&networks).Error
 	} else {
-		err = db.GetDB().Order("id desc").Where("TrainingRunID = ?", run).Find(&networks).Error
+		err = db.GetDB().Order("id desc").Where("training_run_id = ?", run).Find(&networks).Error
 	}
 	if err != nil {
 		log.Println(err)
@@ -1270,7 +1273,7 @@ func setupRouter() *gin.Engine {
 	router.MaxMultipartMemory = 32 << 20 // 32 MiB
 	router.Static("/css", "./public/css")
 	router.Static("/js", "./public/js")
-	router.Static("/stats", "/home/web/netstats")
+	router.Static("/stats", "./netstats")
 
 	router.GET("/", frontPage)
 	router.GET("/get_network", getNetwork)
@@ -1280,6 +1283,7 @@ func setupRouter() *gin.Engine {
 	router.GET("/networks/*run", viewNetworks)
 	router.GET("/stats", viewStats)
 	router.GET("/training_runs", viewTrainingRuns)
+	router.GET("/training_run/:run", viewNetworks)
 	router.GET("/match/:id", viewMatch)
 	router.GET("/matches", viewMatches)
 	router.GET("/active_users", viewActiveUsers)
@@ -1290,7 +1294,6 @@ func setupRouter() *gin.Engine {
 	router.POST("/upload_game", uploadGame)
 	router.POST("/upload_network", uploadNetwork)
 	router.POST("/match_result", matchResult)
-	router.POST("/training_run/:run", viewNetworks)
 	return router
 }
 

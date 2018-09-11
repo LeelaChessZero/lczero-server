@@ -78,26 +78,31 @@ def plot_stats(stats, name, cfg):
 
 
 def main(cfg):
-    conn = psycopg2.connect(dbname=cfg.database, user=cfg.username, password=cfg.password)
+    conn = psycopg2.connect(host="localhost", dbname=cfg.database, user=cfg.username, password=cfg.password)
     cur = conn.cursor()
     cur.execute("SELECT * FROM networks ORDER BY id DESC LIMIT {};".format(cfg.limit))
     cur2 = conn.cursor()
 
+    print("Found {} rows".format(cur.rowcount))
     for i in range(cur.rowcount):
         netrow = cur.fetchone()
         cur2.execute("SELECT * FROM training_games WHERE network_id = {};".format(netrow[0]))
         MAX_PLIES = 450
-        names = ['plycount', 'checkmate', 'stalemate', 'gameover', 'nomaterial', 'white', 'black', 'draw', '3-fold', '50-move']
+        names = ['plycount', 'checkmate', 'resign', 'stalemate', 'gameover', 'nomaterial', 'white', 'black', 'draw', '3-fold', '50-move']
         stats = {}
         failed = 0
 
         for name in names:
             stats[name] = np.zeros((MAX_PLIES, 1), dtype=np.float32)
 
+        if i == 0:
+            continue
+        if cur2.rowcount == 0:
+            continue
         for j in range(cur2.rowcount):
             row = cur2.fetchone()
             board = chess.Board()
-            filename = '/home/web/leela-chess/go/src/server/pgns/run1/' + str(row[0]) + '.pgn'
+            filename = '/home/lc0/server/lczero-server/pgns/run1/' + str(row[0]) + '.pgn'
             try:
               with open(filename) as f:
                 moves = f.read().split('.')
@@ -106,7 +111,10 @@ def main(cfg):
               continue
 
             fail = False
+            resign = False
             for move in moves[1:]:
+                if move.endswith("*"):
+                    resign = True
                 san = move.split()
                 try:
                     board.push_san(san[0])
@@ -126,7 +134,30 @@ def main(cfg):
             plies = len(board.move_stack) - 1
             if not fail and plies < MAX_PLIES:
                 stats['plycount'][plies] += 1
-                if board.is_checkmate():
+                if board.is_stalemate():
+                    if resign:
+                       resign = False
+                    stats['stalemate'][plies] += 1
+                elif board.is_insufficient_material():
+                    if resign:
+                       resign = False
+                    stats['nomaterial'][plies] += 1
+                elif board.can_claim_threefold_repetition():
+                    if resign:
+                       resign = False
+                    stats['3-fold'][plies] += 1
+                elif board.can_claim_fifty_moves():
+                    if resign:
+                       resign = False
+                    stats['50-move'][plies] += 1
+
+                if resign:
+                    stats['resign'][plies] += 1
+                    if plies % 2 == 0:
+                        stats['white'][plies] += 1
+                    else:
+                        stats['black'][plies] += 1
+                elif board.is_checkmate():
                     stats['checkmate'][plies] += 1
                     if plies % 2 == 0:
                         stats['white'][plies] += 1
@@ -134,15 +165,6 @@ def main(cfg):
                         stats['black'][plies] += 1
                 else:
                     stats['draw'][plies] += 1
-
-                if board.is_stalemate():
-                    stats['stalemate'][plies] += 1
-                elif board.is_insufficient_material():
-                    stats['nomaterial'][plies] += 1
-                elif board.can_claim_threefold_repetition():
-                    stats['3-fold'][plies] += 1
-                elif board.can_claim_fifty_moves():
-                    stats['50-move'][plies] += 1
 
                 if board.is_game_over():
                     stats['gameover'][plies] += 1
