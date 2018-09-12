@@ -737,10 +737,16 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 		"net":    0,
 		"rating": 0.0,
 		"best":   false,
+		"sprt":   "???",
+		"id":     "",
+	})
+	result = append(result, gin.H{
+		"net":    0,
+		"rating": 0.0,
+		"best":   false,
 		"sprt":   "FAIL",
 		"id":     "",
 	})
-
 	var count uint64 = 0
 	var elo float64 = 0.0
 	var matchIdx int = 0
@@ -769,16 +775,6 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 				elo += matchElo
 			}
 			matchIdx += 1
-		}
-		// TODO(gary): Hack for start...
-		if network.ID == 3 {
-			result = append(result, gin.H{
-				"net":    count,
-				"rating": elo,
-				"best":   true,
-				"sprt":   sprt,
-				"id":     network.ID,
-			})
 		}
 		count += counts[network.ID]
 		elos[network.ID] = elo
