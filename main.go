@@ -1085,6 +1085,27 @@ func viewTrainingRuns(c *gin.Context) {
 	})
 }
 
+func viewTrainingRun(c *gin.Context) {
+	run, err := strconv.ParseUint(c.Param("run"), 10, 64)
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return
+	}
+
+	progress, _, err := getProgress(uint(run))
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return
+	}
+
+	c.HTML(http.StatusOK, "training_run", gin.H{
+		"run":      run,
+		"progress": progress,
+	})
+}
+
 func viewStats(c *gin.Context) {
 	// TODO: should this be 3 nets per training run?
 	var networks []db.Network
@@ -1265,6 +1286,7 @@ func createTemplates() multitemplate.Render {
 	r.AddFromFiles("game", "templates/base.tmpl", "templates/game.tmpl")
 	r.AddFromFiles("networks", "templates/base.tmpl", "templates/networks.tmpl")
 	r.AddFromFiles("training_runs", "templates/base.tmpl", "templates/training_runs.tmpl")
+	r.AddFromFiles("training_run", "templates/base.tmpl", "templates/training_run.tmpl")
 	r.AddFromFiles("stats", "templates/base.tmpl", "templates/stats.tmpl")
 	r.AddFromFiles("match", "templates/base.tmpl", "templates/match.tmpl")
 	r.AddFromFiles("matches", "templates/base.tmpl", "templates/matches.tmpl")
@@ -1290,7 +1312,7 @@ func setupRouter() *gin.Engine {
 	router.GET("/networks/*run", viewNetworks)
 	router.GET("/stats", viewStats)
 	router.GET("/training_runs", viewTrainingRuns)
-	router.GET("/training_run/:run", viewNetworks)
+	router.GET("/training_run/:run", viewTrainingRun)
 	router.GET("/match/:id", viewMatch)
 	router.GET("/matches/*run", viewMatches)
 	router.GET("/active_users", viewActiveUsers)
