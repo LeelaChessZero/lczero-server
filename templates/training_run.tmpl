@@ -1,0 +1,115 @@
+{{define "content"}}
+<h2>Training run {{.run}}</h2>
+
+    <div id="eloChart"></div>
+
+<h6>You can also look at the <a href="/networks/{{.run}}">networks</a>
+and <a href="/matches/{{.run}}">matches</a> for this run</h6>
+{{end}}
+
+{{define "scripts"}}
+<script src="https://cdn.jsdelivr.net/npm/vega@3.3.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@2.4.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@3.7.1"></script>
+<!-- Vega Tooltip -->
+<script src="https://cdn.jsdelivr.net/npm/vega-tooltip@0.9.14"></script>
+
+<!-- Graphs -->
+<script>
+var vlSpec = {
+	"$schema": "https://vega.github.io/schema/vega-lite/v2.0.json",
+	"description": "Leela Chess Elo rating",
+	"config": {
+		"point": { "size": 50 }
+	},
+	"width": 563, "height": 375,
+	"data": {"values": {{.progress}}},
+	"layer": [
+		{
+			"transform": [
+				{ "filter": { "field": "best", "equal": "true" } }
+			],
+			"mark": {
+				"type": "line",
+				"interpolate": "monotone"
+			},
+			"encoding": {
+				"x": {
+					"field": "net",
+					"type": "quantitative",
+					"axis": {
+						"title": "Number of accumulated games",
+					},
+					"scale": {
+						"zero": false
+					}
+				},
+				"y": {
+					"field": "rating",
+					"type": "quantitative",
+					"axis": {
+						"title": "Elo rating (0 = random play)"
+					},
+					"scale": {
+						"zero": false
+					}
+				},
+				"color": {
+					"value": "blue"
+				},
+				"order": {
+					"field": "net", "type": "quantitative"
+				}
+			}
+		},
+		{
+			"transform": [
+				{ "filter": "datum.rating > -1" },
+				{ "calculate": "format(datum.net, ',d')", "as": "net_formatted" },
+				{ "calculate": "format(datum.rating, ',.2f')", "as": "rating_formatted" }
+			],
+			"mark": {"type": "point", "filled": true},
+			"encoding": {
+				"x": {
+					"field": "net",
+					"type": "quantitative",
+					"axis": {
+						"title": "Number of accumulated games",
+					},
+					"scale": {
+						"zero": false
+					}
+				},
+				"y": {
+					"field": "rating",
+					"type": "quantitative",
+					"axis": {
+						"title": "Elo rating (0 = random play)"
+					},
+					"scale": {
+						"zero": false
+					}
+				},
+				"color": {
+					"field": "sprt", "type": "nominal",
+					"scale": {"range": ["#59E817", "#C11B17", "blue"]}
+				},
+				"shape": {
+					"field": "sprt", "type": "nominal",
+					"scale": {"range": ["circle", "triangle-down", "circle"]}
+				},
+				"tooltip": [
+					{"type": "nominal", "field": "id", "title": "Network Id"},
+					{"type": "nominal", "field": "net_formatted", "title": "Number of trained games"},
+					{"type": "nominal", "field": "rating_formatted", "title": "Elo rating (0 = random play)"},
+					{"type": "nominal", "field": "sprt", "title": "SPRT"}
+				]
+			}
+		}
+	]
+}
+vegaEmbed("#eloChart", vlSpec, { actions: false })
+.catch(console.error);
+</script>
+
+{{end}}
