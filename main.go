@@ -756,7 +756,10 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 		for matchIdx < len(matches) && (matches[matchIdx].CandidateID == network.ID || matches[matchIdx].TestOnly) {
 			matchElo := calcElo(matches[matchIdx].Wins, matches[matchIdx].Losses, matches[matchIdx].Draws)
 			if matches[matchIdx].Done {
-				if matches[matchIdx].Passed {
+				if matches[matchIdx].TestOnly {
+					sprt = "???"
+					best = false
+				} else if matches[matchIdx].Passed {
 					sprt = "PASS"
 					best = true
 				} else {
