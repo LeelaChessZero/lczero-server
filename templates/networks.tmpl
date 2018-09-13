@@ -5,6 +5,7 @@
     <thead>
       <tr>
         <th>Id</th>
+        <th>Run</th>
         <th>Number</th>
         <th>Network</th>
         <th>Elo</th>
@@ -18,6 +19,7 @@
       {{range .networks}}
       <tr>
         <td>{{.id}}</td>
+        <td>{{.training_id}}</td>
         <td>{{.number}}</td>
         <td><a href="/get_network?sha={{.sha}}" download="weights_run{{.training_id}}_{{.number}}.pb.gz">{{.short_sha}}</a></td>
         <td>{{.elo}}</td>

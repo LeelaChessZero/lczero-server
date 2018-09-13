@@ -1143,6 +1143,23 @@ func viewMatches(c *gin.Context) {
 		return
 	}
 
+	var networks []db.Network
+	if run == "" {
+		err = db.GetDB().Order("id").Find(&networks).Error
+	} else {
+		err = db.GetDB().Order("id").Where("training_run_id=?", run).Find(&networks).Error
+	}
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return
+	}
+
+	number := make(map[uint]uint)
+	for _, network := range networks {
+		number[network.ID] = network.NetworkNumber
+	}
+
 	json := []gin.H{}
 	for _, match := range matches {
 		elo := calcElo(match.Wins, match.Losses, match.Draws)
@@ -1167,12 +1184,12 @@ func viewMatches(c *gin.Context) {
 		if match.TestOnly {
 			passed = "test"
 		}
-		// TODO: show run network numbers instead of network ids.
+
 		json = append(json, gin.H{
 			"id":           match.ID,
 			"training_id":  match.TrainingRunID,
-			"current_id":   match.CurrentBestID,
-			"candidate_id": match.CandidateID,
+			"current":      number[match.CurrentBestID],
+			"candidate":    number[match.CandidateID],
 			"score":        fmt.Sprintf("+%d -%d =%d", match.Wins, match.Losses, match.Draws),
 			"elo":          fmt.Sprintf("%.1f", elo),
 			"error":        elo_error_str,
