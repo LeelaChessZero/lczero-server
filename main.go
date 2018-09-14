@@ -1098,10 +1098,16 @@ func viewTrainingRun(c *gin.Context) {
 		c.String(500, "Internal error")
 		return
 	}
+	full := true
+	if c.DefaultQuery("full_elo", "0") == "0" {
+		progress = filterProgress(progress)
+		full = false
+	}
 
 	c.HTML(http.StatusOK, "training_run", gin.H{
 		"run":      run,
 		"progress": progress,
+		"full":     full,
 	})
 }
 

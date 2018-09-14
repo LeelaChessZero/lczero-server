@@ -1,10 +1,14 @@
 {{define "content"}}
 <h2>Training run {{.run}}</h2>
 
-    <div id="eloChart"></div>
+<div id="eloChart"></div>
 
-<h6>You can also look at the <a href="/networks/{{.run}}">networks</a>
-and <a href="/matches/{{.run}}">matches</a> for this run</h6>
+<h6>You can also look at the
+{{if not .full}}
+	<a href="/training_run/{{.run}}?full_elo=1">full Elo graph</a>,
+{{end}}
+<a href="/networks/{{.run}}">networks</a> and <a href="/matches/{{.run}}">matches</a> for this run</h6>
+
 {{end}}
 
 {{define "scripts"}}
