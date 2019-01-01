@@ -73,9 +73,28 @@ func nextGame(c *gin.Context) {
 		return
 	}
 
-	// TODO: support user arg to request to override assignment.
-	assignedID := user.AssignedTrainingRunID
-	// If not assigned, assign them to primary, which shall be assumed to be run 1.
+	token, err := strconv.ParseInt(c.PostForm("token"), 10, 32)
+	if err != nil {
+		log.Println(user.Username)
+		log.Println(strings.TrimSpace(err.Error()))
+		c.String(http.StatusBadRequest, "Missing or invalid token field.")
+		return
+	}
+	if token < 0 {
+		token = 0
+	}
+	assignedID := uint(token) >> 16
+	if assignedID == 0 {
+		assignedID = user.AssignedTrainingRunID
+		// Balance unassigneds a bit.
+		if assignedID == 0 {
+			// Change constant to decide what fraction goes to which run.
+			if token > 70000 {
+				assignedID = 2
+			}
+		}
+	}
+	// If still not assigned, assign them to primary, which shall be assumed to be run 1.
 	if assignedID == 0 {
 		assignedID = 1
 	}
@@ -229,11 +248,13 @@ func uploadNetwork(c *gin.Context) {
 		c.String(500, "Internal error")
 		return	
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var nextNetworkNumber uint
-		rows.Scan(&nextNetworkNumber)
-		network.NetworkNumber = nextNetworkNumber
+	{
+		defer rows.Close()
+		for rows.Next() {
+			var nextNetworkNumber uint
+			rows.Scan(&nextNetworkNumber)
+			network.NetworkNumber = nextNetworkNumber
+		}
 	}
 	layers, err := strconv.ParseInt(c.PostForm("layers"), 10, 32)
 	network.Layers = int(layers)
@@ -381,6 +402,11 @@ func uploadGame(c *gin.Context) {
 		c.String(http.StatusBadRequest, "Missing file")
 		return
 	}
+	if file.Size <= 0 {
+		log.Println("Zero sized upload received.");
+		c.String(http.StatusBadRequest, "Zero length file")
+		return
+	}
 
 	// Atomic network game run sequence number increment and acquire.
 	rows, err := db.GetDB().Raw("WITH updated AS (UPDATE training_runs SET last_game = last_game + 1 WHERE id = ? RETURNING last_game) SELECT * FROM updated", uint(training_id)).Rows()
@@ -391,9 +417,11 @@ func uploadGame(c *gin.Context) {
 	}
 	var nextGameNumber uint
 	nextGameNumber = 0
-	defer rows.Close()
-	for rows.Next() {
-		rows.Scan(&nextGameNumber)
+	{
+		defer rows.Close()
+		for rows.Next() {
+			rows.Scan(&nextGameNumber)
+		}
 	}
 	if nextGameNumber == 0 {
 		log.Println("Couldn't get a new game number.'")
@@ -1266,12 +1294,13 @@ func viewTrainingData(c *gin.Context) {
 		c.String(500, "Internal error")
 		return
 	}
-	defer rows.Close()
-
 	var id uint
-	for rows.Next() {
-		rows.Scan(&id)
-		break
+	{
+		defer rows.Close()
+		for rows.Next() {
+			rows.Scan(&id)
+			break
+		}
 	}
 
 	files := []gin.H{}
