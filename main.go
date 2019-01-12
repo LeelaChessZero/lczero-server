@@ -119,11 +119,14 @@ func nextGame(c *gin.Context) {
 	}
 
 	var match []db.Match
-	err = db.GetDB().Preload("Candidate").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
-	if err != nil {
-		log.Println(err)
-		c.String(500, "Internal error 2")
-		return
+	// Skip matches on request
+	if !strings.Contains(c.PostForm("train_only"), "true") {
+		err = db.GetDB().Preload("Candidate").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
+		if err != nil {
+			log.Println(err)
+			c.String(500, "Internal error 2")
+			return
+		}
 	}
 	if len(match) > 0 {
 		// Return this match
