@@ -14,12 +14,14 @@ var Config struct {
 		Password string
 	}
 	Clients struct {
-		MinClientVersion uint64
-		MinEngineVersion string
+		MinClientVersion  uint64
+		NextClientVersion uint64
+		MinEngineVersion  string
+		NextEngineVersion string
 	}
 	URLs struct {
-		OnNewNetwork    []string
-		NetworkLocation string
+		OnNewNetwork          []string
+		NetworkLocation       string
 		BackupNetworkLocation string
 	}
 	Matches struct {

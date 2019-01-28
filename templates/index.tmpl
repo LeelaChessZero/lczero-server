@@ -1,14 +1,15 @@
 {{define "content"}}
 <div class="alert alert-primary" role="alert">
-  Training has changed to require lc0 instead of lczero.
-  You can get the <a href="https://github.com/LeelaChessZero/lczero-client/releases/tag/v0.16.0">new client</a> and <a href="https://github.com/LeelaChessZero/lc0/releases/tag/v0.16.0">lc0</a> releases from those links.<br>
-  As it's planned to stop the training on this server soon, all clients are switched to contributing to a <a href="http://testserver.lczero.org/">test server</a>.
+  This is the testing instance of LCZero server.<br>
+  Here we pretend to test things but sometimes actually run things to completion.<br>
+  We have started another major run that aims to demonstrate a lot of what we have learnt so far, rather than being subject to continual tweaks. Main page will show its progress. Other test runs can be seen under the training runs section.<br>
+  You can get the <a href="https://github.com/LeelaChessZero/lczero-client/releases">client</a> and <a href="https://github.com/LeelaChessZero/lc0/releases">lc0</a> releases from those links.
 </div>
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
   <h1 class="h2">Progress</h1>
   <div class="btn-toolbar mb-2 mb-md-0">
-    <div class="btn-group mr-2">
+    <div class="btn-group mr-3">
       <button class="btn btn-sm btn-outline-secondary">Share</button>
       <button class="btn btn-sm btn-outline-secondary">Export</button>
     </div>
@@ -50,7 +51,7 @@
     <div id="eloChart"></div>
   </div>
   <div class="tab-pane" id="tab-elo-estimates" role="tabpanel">
-    <iframe src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSwX4iqK3zxus6GFPkifWU70is7PCelQH3Hl2YK7wIBeL9FmARyo0lEemUvS_dEpnarOPJAYjuWNLYb/pubchart?oid=1153355782&format=interactive" width="610" height="400"></iframe>
+    <iframe src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSwX4iqK3zxus6GFPkifWU70is7PCelQH3Hl2YK7wIBeL9FmARyo0lEemUvS_dEpnarOPJAYjuWNLYb/pubchart?oid=11152450&format=interactive" width="610" height="400"></iframe>
   </div>
 </div>
 </div>
@@ -239,7 +240,7 @@ $(function() {
       var chunks = $("#train-progress").text().split('/');
       var played = parseInt(chunks[0]);
       var target = parseInt(chunks[1]);
-      played += 2;
+      played += 13;
       if (played > target) played = target;
       var current_progress = (played * 100.0) / target;
       $("#train-progress")

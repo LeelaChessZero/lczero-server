@@ -6,17 +6,20 @@
     "password": "gorm"
   },
   "clients": {
-    "minClientVersion": 16,
-    "minEngineVersion": "v0.16.0"
+    "minClientVersion": 18,
+    "nextClientVersion": 20,
+    "minEngineVersion": "v0.20.1-rc3",
+    "nextEngineVersion": "v0.20.1"
   },
   "urls": {
-    "onNewNetwork": ["aws", "s3", "cp", "%NETWORK_PATH%", "s3://lczero/networks/"],
-    "networkLocation": "/cached/network/sha/"
-  },
+    "onNewNetwork": [],
+    "networkLocation": "/cached/network/sha/",
+    "backupNetworkLocation": "http://data.lczero.org/files/networks/"
+  }, 
   "matches": {
     "games": 400,
-    "parameters": ["--tempdecay-moves=20", "--temperature=1", "--cpuct=1.2", "--fpu-reduction=0.0", "--policy-softmax-temp=1.0"],
-    "threshold": -150.0
+    "parameters": ["--tempdecay-moves=20", "--temperature=1", "--cpuct=2.5", "--fpu-reduction=0.0", "--policy-softmax-temp=1.0", "--noise=true", "--minibatch-size=256", "--out-of-order-eval=true", "--max-collision-visits=9999", "--max-collision-events=32", "--cache-history-length=0", "--smart-pruning-factor=1.33"],
+    "threshold": -100.0
   },
   "webserver": {
     "address": ":8080"
