@@ -1199,7 +1199,7 @@ func viewNetworks(c *gin.Context) {
 
 func viewTrainingRuns(c *gin.Context) {
 	training_runs := []db.TrainingRun{}
-	err := db.GetDB().Debug().Preload("BestNetwork").Find(&training_runs).Error
+	err := db.GetDB().Preload("BestNetwork").Find(&training_runs).Error
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
