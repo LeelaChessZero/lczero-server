@@ -56,7 +56,9 @@ func checkUser(c *gin.Context) (*db.User, uint64, error) {
 		log.Printf("Rejecting old game from %s, version %d\n", user.Username, version)
 		return nil, 0, errors.New("you must upgrade to a newer version")
 	}
-
+	if version < config.Config.Clients.NextClientVersion {
+		log.Printf("Would reject old game from %s, version %d with new threshold.\n", user.Username, version)
+	}
 	return user, version, nil
 }
 
@@ -67,7 +69,6 @@ func nextGame(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-
 	if user == nil {
 		c.String(http.StatusBadRequest, "User load or create failed.")
 		return
@@ -88,8 +89,7 @@ func nextGame(c *gin.Context) {
 		assignedID = user.AssignedTrainingRunID
 		// Balance unassigneds a bit.
 		if assignedID == 0 {
-			// Change constant to decide what fraction goes to which run.
-			if token > 70000 {
+			if token > 35000 {
 				assignedID = 2
 			}
 		}
@@ -100,7 +100,7 @@ func nextGame(c *gin.Context) {
 	}
 
 	trainingRun := db.TrainingRun{
-		Model: gorm.Model{ID: assignedID,},
+		Model:  gorm.Model{ID: assignedID},
 		Active: true,
 	}
 	err = db.GetDB().Where(&trainingRun).First(&trainingRun).Error
@@ -121,7 +121,7 @@ func nextGame(c *gin.Context) {
 	var match []db.Match
 	// Skip matches on request
 	if !strings.Contains(c.PostForm("train_only"), "true") {
-		err = db.GetDB().Preload("Candidate").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
+		err = db.GetDB().Order("id").Preload("Candidate").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
 		if err != nil {
 			log.Println(err)
 			c.String(500, "Internal error 2")
@@ -206,14 +206,102 @@ func uploadNetwork(c *gin.Context) {
 		c.String(http.StatusBadRequest, "Missing file")
 		return
 	}
+	written := false
+	tempFileName := ""
+	sha := ""
+	prevNetSha := c.PostForm("prev_delta_sha")
+	if prevNetSha != "" {
+		prevNetwork := db.Network{
+			Sha: prevNetSha,
+		}
 
-	// Compute hash of network
-	sha, err := computeSha(file)
-	if err != nil {
-		log.Println(err.Error())
-		c.String(500, "Internal error")
-		return
+		// Check for existing network
+		err := db.GetDB().Where(&prevNetwork).First(&prevNetwork).Error
+		if err != nil {
+			log.Println(err)
+			c.String(400, "Unknown previous network")
+			return
+		}
+		if _, err := os.Stat(prevNetwork.Path); os.IsNotExist(err) {
+			c.String(400, "Previous network missing")
+			return
+		}
+		h := sha256.New()
+		prevReader, err := os.Open(prevNetwork.Path)
+		if err != nil {
+			c.String(400, "Couldn't open previous network")
+			return
+		}
+		defer prevReader.Close()
+		deltaReader, err := file.Open()
+		if err != nil {
+			c.String(400, "Couldn't open delta stream")
+			return
+		}
+		defer deltaReader.Close()
+
+		zrPrev, err := gzip.NewReader(prevReader)
+		if err != nil {
+			c.String(400, "Previous network corrupt")
+			return
+		}
+		zrDelta, err := gzip.NewReader(deltaReader)
+		if err != nil {
+			c.String(400, "Delta corrupt")
+			return
+		}
+		writer, err := ioutil.TempFile("", "deltaworkfile")
+		defer writer.Close()
+		tempFileName = writer.Name()
+
+		prevData, err := ioutil.ReadAll(zrPrev)
+		if err != nil {
+			c.String(400, "Read prev failed.")
+			return
+		}
+		deltaData, err := ioutil.ReadAll(zrDelta)
+		if err != nil {
+			c.String(400, "Read delta failed.")
+			return
+		}
+		if len(prevData) != len(deltaData) {
+			c.String(400, "Data lengths don't match.")
+			return
+		}
+		for i := 0; i < len(prevData); i++ {
+			prevData[i] ^= deltaData[i]
+		}
+		_, err = h.Write(prevData)
+		if err != nil {
+			c.String(400, "Failed to write data to sha.")
+			return
+		}
+		zwTemp := gzip.NewWriter(writer)
+		defer zwTemp.Close()
+		_, err = zwTemp.Write(prevData)
+		if err != nil {
+			c.String(400, "Failed to write data to tempFile.")
+			return
+		}
+		zwTemp.Close()
+		writer.Close()
+		sha = fmt.Sprintf("%x", h.Sum(nil))
+		if len(sha) != 64 {
+			c.String(400, "Sha failed")
+			return
+		}
+		written = true
+	} else {
+
+		// Compute hash of network
+		sha, err = computeSha(file)
+		if err != nil {
+			log.Println(err.Error())
+			c.String(500, "Internal error")
+			return
+		}
 	}
+
 	network := db.Network{
 		Sha: sha,
 	}
@@ -249,7 +337,7 @@ func uploadNetwork(c *gin.Context) {
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
-		return	
+		return
 	}
 	{
 		defer rows.Close()
@@ -278,11 +366,24 @@ func uploadNetwork(c *gin.Context) {
 
 	os.MkdirAll(filepath.Dir(network.Path), os.ModePerm)
 
-	// Save the file
-	if err := c.SaveUploadedFile(file, network.Path); err != nil {
-		log.Println(err.Error())
-		c.String(500, "Saving file")
-		return
+	if !written {
+		// Save the file
+		if err := c.SaveUploadedFile(file, network.Path); err != nil {
+			log.Println(err.Error())
+			c.String(500, "Saving file")
+			return
+		}
+	} else {
+		tempFileData, err := ioutil.ReadFile(tempFileName)
+		if err != nil {
+			c.String(500, "Can't open temp file to copy.")
+			return
+		}
+		err = ioutil.WriteFile(network.Path, tempFileData, 0644)
+		if err != nil {
+			c.String(500, "Can't copy to network file.")
+			return
+		}
 	}
 
 	// TODO(gary): Make this more generic - upload to s3 for now
@@ -302,7 +403,6 @@ func uploadNetwork(c *gin.Context) {
 			return
 		}
 	}
-
 
 	// Create a match to see if this network is better
 	params, err := json.Marshal(config.Config.Matches.Parameters)
@@ -333,10 +433,18 @@ func uploadNetwork(c *gin.Context) {
 	c.String(http.StatusOK, fmt.Sprintf("Network %s uploaded successfully.", network.Sha))
 }
 
-func checkEngineVersion(engineVersion string) bool {
+func checkEngineVersion(engineVersion string, username string) bool {
 	v, err := version.NewVersion(engineVersion)
 	if err != nil {
 		return false
+	}
+	target_soft, err := version.NewVersion(config.Config.Clients.NextEngineVersion)
+	if err != nil {
+		log.Println("Invalid comparison version, rejecting all clients!!!")
+		return false
+	}
+	if v.Compare(target_soft) < 0 {
+		log.Printf("%s would be rejected with proposed threshold.", username)
 	}
 	target, err := version.NewVersion(config.Config.Clients.MinEngineVersion)
 	if err != nil {
@@ -353,12 +461,11 @@ func uploadGame(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if !checkEngineVersion(c.PostForm("engineVersion")) {
+	if !checkEngineVersion(c.PostForm("engineVersion"), user.Username) {
 		log.Printf("Rejecting game with old lczero version %s", c.PostForm("engineVersion"))
 		c.String(http.StatusBadRequest, "\n\n\n\n\nYou must upgrade to a newer lczero version!!\n\n\n\n\n")
 		return
 	}
-
 	training_id, err := strconv.ParseUint(c.PostForm("training_id"), 10, 32)
 	if err != nil {
 		log.Println(err)
@@ -406,7 +513,7 @@ func uploadGame(c *gin.Context) {
 		return
 	}
 	if file.Size <= 0 {
-		log.Println("Zero sized upload received.");
+		log.Println("Zero sized upload received.")
 		c.String(http.StatusBadRequest, "Zero length file")
 		return
 	}
@@ -416,7 +523,7 @@ func uploadGame(c *gin.Context) {
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
-		return	
+		return
 	}
 	var nextGameNumber uint
 	nextGameNumber = 0
@@ -429,7 +536,7 @@ func uploadGame(c *gin.Context) {
 	if nextGameNumber == 0 {
 		log.Println("Couldn't get a new game number.'")
 		c.String(500, "Internal error")
-		return	
+		return
 	}
 
 	// Create new game
@@ -569,7 +676,7 @@ func matchResult(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if !checkEngineVersion(c.PostForm("engineVersion")) {
+	if !checkEngineVersion(c.PostForm("engineVersion"), user.Username) {
 		log.Printf("Rejecting game with old lczero version %s", c.PostForm("engineVersion"))
 		c.String(http.StatusBadRequest, "\n\n\n\n\nYou must upgrade to a newer lczero version!!\n\n\n\n\n")
 		return
@@ -676,12 +783,12 @@ ORDER BY count DESC`).Rows()
 
 		if userLimit == -1 || active_users <= userLimit {
 			users_json = append(users_json, gin.H{
-				"user":         username,
-				"games_today":  count,
-				"system":       "",
-				"version":      version,
-				"engine":       engine_version,
-				"last_updated": created_at,
+				"user":                     username,
+				"games_today":              count,
+				"system":                   "",
+				"version":                  version,
+				"engine":                   engine_version,
+				"last_updated":             created_at,
 				"assigned_training_run_id": assigned_training_run_id,
 			})
 		}
@@ -1050,8 +1157,8 @@ func viewNetworks(c *gin.Context) {
 		log.Println(err)
 		c.String(500, "Internal error")
 		return
-	}	
-	allElos :=  make(map[uint]float64)
+	}
+	allElos := make(map[uint]float64)
 	trainingRunIDs := make(map[uint]bool)
 	for _, network := range networks {
 		if !trainingRunIDs[network.TrainingRunID] {
@@ -1092,7 +1199,7 @@ func viewNetworks(c *gin.Context) {
 
 func viewTrainingRuns(c *gin.Context) {
 	training_runs := []db.TrainingRun{}
-	err := db.GetDB().Preload("BestNetwork").Find(&training_runs).Error
+	err := db.GetDB().Debug().Preload("BestNetwork").Find(&training_runs).Error
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
@@ -1102,11 +1209,11 @@ func viewTrainingRuns(c *gin.Context) {
 	rows := []gin.H{}
 	for _, training_run := range training_runs {
 		rows = append(rows, gin.H{
-			"id":            training_run.ID,
-			"active":        training_run.Active,
-			"trainParams":   training_run.TrainParameters,
-			"bestNetwork":   training_run.BestNetwork.NetworkNumber,
-			"description":   training_run.Description,
+			"id":          training_run.ID,
+			"active":      training_run.Active,
+			"trainParams": training_run.TrainParameters,
+			"bestNetwork": training_run.BestNetwork.NetworkNumber,
+			"description": training_run.Description,
 		})
 	}
 
@@ -1223,17 +1330,17 @@ func viewMatches(c *gin.Context) {
 		}
 
 		json = append(json, gin.H{
-			"id":           match.ID,
-			"training_id":  match.TrainingRunID,
-			"current":      number[match.CurrentBestID],
-			"candidate":    number[match.CandidateID],
-			"score":        fmt.Sprintf("+%d -%d =%d", match.Wins, match.Losses, match.Draws),
-			"elo":          fmt.Sprintf("%.1f", elo),
-			"error":        elo_error_str,
-			"done":         match.Done,
-			"table_class":  table_class,
-			"passed":       passed,
-			"created_at":   match.CreatedAt,
+			"id":          match.ID,
+			"training_id": match.TrainingRunID,
+			"current":     number[match.CurrentBestID],
+			"candidate":   number[match.CandidateID],
+			"score":       fmt.Sprintf("+%d -%d =%d", match.Wins, match.Losses, match.Draws),
+			"elo":         fmt.Sprintf("%.1f", elo),
+			"error":       elo_error_str,
+			"done":        match.Done,
+			"table_class": table_class,
+			"passed":      passed,
+			"created_at":  match.CreatedAt,
 		})
 	}
 
@@ -1305,7 +1412,6 @@ func viewTrainingData(c *gin.Context) {
 			break
 		}
 	}
-
 	files := []gin.H{}
 	game_id := int(id + 1 - 500000)
 	if game_id < 0 {
@@ -1372,7 +1478,7 @@ func setupRouter() *gin.Engine {
 	router.GET("/active_users", viewActiveUsers)
 	router.GET("/match_game/:id", viewMatchGame)
 	router.GET("/training_data", viewTrainingData)
-	router.GET("/game_moved", func(c *gin.Context) {c.HTML(http.StatusOK, "game_moved", nil)})
+	router.GET("/game_moved", func(c *gin.Context) { c.HTML(http.StatusOK, "game_moved", nil) })
 	router.POST("/next_game", nextGame)
 	router.POST("/upload_game", uploadGame)
 	router.POST("/upload_network", uploadNetwork)

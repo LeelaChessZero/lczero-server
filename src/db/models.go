@@ -9,15 +9,15 @@ import (
 type User struct {
 	gorm.Model
 
-	Username string
-	Password string
+	Username              string
+	Password              string
 	AssignedTrainingRunID uint
 }
 
 type TrainingRun struct {
 	gorm.Model
 
-	BestNetwork   Network
+	BestNetwork   Network `gorm:"foreignkey:BestNetworkID;association_foreignkey:ID"`
 	BestNetworkID uint
 	Matches       []Match
 
