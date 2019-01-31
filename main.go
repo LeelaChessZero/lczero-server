@@ -89,7 +89,7 @@ func nextGame(c *gin.Context) {
 		assignedID = user.AssignedTrainingRunID
 		// Balance unassigneds a bit.
 		if assignedID == 0 {
-			if token > 35000 {
+			if token > 60000 {
 				assignedID = 2
 			}
 		}
@@ -121,7 +121,7 @@ func nextGame(c *gin.Context) {
 	var match []db.Match
 	// Skip matches on request
 	if !strings.Contains(c.PostForm("train_only"), "true") {
-		err = db.GetDB().Order("id").Preload("Candidate").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
+		err = db.GetDB().Order("id").Preload("Candidate").Preload("CurrentBest").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
 		if err != nil {
 			log.Println(err)
 			c.String(500, "Internal error 2")
@@ -147,7 +147,7 @@ func nextGame(c *gin.Context) {
 		result := gin.H{
 			"type":         "match",
 			"matchGameId":  matchGame.ID,
-			"sha":          network.Sha,
+			"sha":          match[0].CurrentBest.Sha,
 			"candidateSha": match[0].Candidate.Sha,
 			"params":       match[0].Parameters,
 			"flip":         flip,
@@ -162,6 +162,7 @@ func nextGame(c *gin.Context) {
 		"networkId":  trainingRun.BestNetworkID,
 		"sha":        network.Sha,
 		"params":     trainingRun.TrainParameters,
+		"keepTime":   "16h",
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -197,6 +198,21 @@ func getTrainingRun(trainingID uint) (*db.TrainingRun, error) {
 		return nil, err
 	}
 	return &trainingRun, nil
+}
+
+func createMatch(trainingRun *db.TrainingRun, network *db.Network, testonly bool, params string) error {
+	match := db.Match{
+		TrainingRunID: trainingRun.ID,
+		CandidateID:   network.ID,
+		CurrentBestID: trainingRun.BestNetworkID,
+		Done:          false,
+		GameCap:       config.Config.Matches.Games,
+		Parameters:    params,
+	}
+	if testonly {
+		match.TestOnly = true
+	}
+	return db.GetDB().Create(&match).Error
 }
 
 func uploadNetwork(c *gin.Context) {
@@ -251,8 +267,9 @@ func uploadNetwork(c *gin.Context) {
 			return
 		}
 		writer, err := ioutil.TempFile("", "deltaworkfile")
-		defer writer.Close()
 		tempFileName = writer.Name()
+		defer os.Remove(tempFileName)
+		defer writer.Close()
 
 		prevData, err := ioutil.ReadAll(zrPrev)
 		if err != nil {
@@ -411,23 +428,32 @@ func uploadNetwork(c *gin.Context) {
 		c.String(500, "Internal error")
 		return
 	}
+	var bestNetwork db.Network
+	err = db.GetDB().Where("id = ?", trainingRun.BestNetworkID).First(&bestNetwork).Error
+	if err != nil {
+		log.Println(err)
+		// No valid best network, but it has uploaded successfully.
+		c.String(http.StatusOK, fmt.Sprintf("Network %s uploaded successfully, remember to manually set it as best.", network.Sha))
+		return
+	}
 
-	match := db.Match{
-		TrainingRunID: uint(trainingRunID),
-		CandidateID:   network.ID,
-		CurrentBestID: trainingRun.BestNetworkID,
-		Done:          false,
-		GameCap:       config.Config.Matches.Games,
-		Parameters:    string(params[:]),
-	}
-	if c.DefaultPostForm("testonly", "0") == "1" {
-		match.TestOnly = true
-	}
-	err = db.GetDB().Create(&match).Error
+	err = createMatch(trainingRun, &network, c.DefaultPostForm("testonly", "0") == "1", string(params[:]))
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
 		return
+	}
+
+	// Regression tests for current best.  Done here because the 'end of match' code logic isn't thread safe, so could create matches multiple times.
+	var prevNetwork1 db.Network
+	err = db.GetDB().Where("network_number = ?", bestNetwork.NetworkNumber-3).First(&prevNetwork1).Error
+	if err == nil {
+		createMatch(trainingRun, &prevNetwork1, true, string(params[:]))
+	}
+	var prevNetwork2 db.Network
+	err = db.GetDB().Where("network_number = ?", bestNetwork.NetworkNumber-10).First(&prevNetwork2).Error
+	if err == nil {
+		createMatch(trainingRun, &prevNetwork2, true, string(params[:]))
 	}
 
 	c.String(http.StatusOK, fmt.Sprintf("Network %s uploaded successfully.", network.Sha))
@@ -788,7 +814,7 @@ ORDER BY count DESC`).Rows()
 				"system":                   "",
 				"version":                  version,
 				"engine":                   engine_version,
-				"last_updated":             created_at,
+				"last_updated":             created_at.Format("2006-01-02 15:04:05 -07:00"),
 				"assigned_training_run_id": assigned_training_run_id,
 			})
 		}
@@ -877,6 +903,7 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 		"best":   false,
 		"sprt":   "???",
 		"id":     "",
+		"anchor": true,
 	})
 	result = append(result, gin.H{
 		"net":    0,
@@ -884,6 +911,7 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 		"best":   false,
 		"sprt":   "FAIL",
 		"id":     "",
+		"anchor": true,
 	})
 	var count uint64 = 0
 	var elo float64 = 0.0
@@ -892,6 +920,10 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 		var sprt string = "???"
 		var best bool = false
 		for matchIdx < len(matches) && (matches[matchIdx].CandidateID == network.ID || matches[matchIdx].TestOnly) {
+			if matches[matchIdx].TestOnly && network.EloSet {
+				matchIdx += 1
+				continue
+			}
 			matchElo := calcElo(matches[matchIdx].Wins, matches[matchIdx].Losses, matches[matchIdx].Draws)
 			if matches[matchIdx].Done {
 				if matches[matchIdx].TestOnly {
@@ -905,16 +937,24 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 					best = false
 				}
 			}
+			if math.IsNaN(matchElo) {
+				matchElo = 0.0
+			}
+			nextElo := elo + matchElo
+			if !matches[matchIdx].TestOnly && matches[matchIdx].Passed {
+				if network.EloSet {
+					nextElo = network.Elo
+				}
+				elo = nextElo
+			}
 			result = append(result, gin.H{
 				"net":    count,
-				"rating": elo + matchElo,
+				"rating": nextElo,
 				"best":   best,
 				"sprt":   sprt,
 				"id":     network.NetworkNumber,
+				"anchor": network.Anchor,
 			})
-			if !matches[matchIdx].TestOnly && matches[matchIdx].Passed {
-				elo += matchElo
-			}
 			matchIdx += 1
 		}
 		count += counts[network.ID]
@@ -922,6 +962,37 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 	}
 
 	return result, elos, nil
+}
+
+func filterProgressToAnchor(result []gin.H) []gin.H {
+	i := len(result) - 1
+	for ; i > 0; i -= 1 {
+		str := fmt.Sprintf("%v", result[i]["anchor"])
+		if str == "true" {
+			break
+		}
+	}
+	// Show just the last 100 networks
+	result = result[i:]
+
+	// Ensure the ordering is correct now (HACK)
+	tmp := []gin.H{}
+	tmp = append(tmp, gin.H{
+		"net":    result[0]["net"],
+		"rating": result[0]["rating"],
+		"best":   false,
+		"sprt":   "???",
+		"id":     "",
+	})
+	tmp = append(tmp, gin.H{
+		"net":    result[0]["net"],
+		"rating": result[0]["rating"],
+		"best":   false,
+		"sprt":   "FAIL",
+		"id":     "",
+	})
+
+	return append(tmp, result...)
 }
 
 func filterProgress(result []gin.H) []gin.H {
@@ -1067,7 +1138,7 @@ func user(c *gin.Context) {
 	for _, game := range games {
 		gamesJson = append(gamesJson, gin.H{
 			"id":         game.ID,
-			"created_at": game.CreatedAt.String(),
+			"created_at": game.CreatedAt.Format("2006-01-02 15:04:05 -07:00"),
 			"network":    game.Network.Sha,
 		})
 	}
@@ -1188,7 +1259,8 @@ func viewNetworks(c *gin.Context) {
 			"short_sha":   network.Sha[0:8],
 			"blocks":      network.Layers,
 			"filters":     network.Filters,
-			"created_at":  network.CreatedAt,
+			"created_at":  network.CreatedAt.Format("2006-01-02 15:04:05 -07:00"),
+			"real_elo":    network.Elo,
 		})
 	}
 
@@ -1239,6 +1311,10 @@ func viewTrainingRun(c *gin.Context) {
 	full := true
 	if c.DefaultQuery("full_elo", "0") == "0" {
 		progress = filterProgress(progress)
+		full = false
+	}
+	if c.DefaultQuery("to_last_anchor", "1") == "1" {
+		progress = filterProgressToAnchor(progress)
 		full = false
 	}
 
@@ -1316,6 +1392,8 @@ func viewMatches(c *gin.Context) {
 		if match.Done {
 			if match.Passed {
 				table_class = "success"
+			} else if match.TestOnly {
+				table_class = "info"
 			} else {
 				table_class = "danger"
 			}
@@ -1340,7 +1418,7 @@ func viewMatches(c *gin.Context) {
 			"done":        match.Done,
 			"table_class": table_class,
 			"passed":      passed,
-			"created_at":  match.CreatedAt,
+			"created_at":  match.CreatedAt.Format("2006-01-02 15:04:05 -07:00"),
 		})
 	}
 
@@ -1384,7 +1462,7 @@ func viewMatch(c *gin.Context) {
 		}
 		gamesJson = append(gamesJson, gin.H{
 			"id":         game.ID,
-			"created_at": game.CreatedAt.String(),
+			"created_at": game.CreatedAt.Format("2006-01-02 15:04:05 -07:00"),
 			"result":     result,
 			"done":       game.Done,
 			"user":       game.User.Username,

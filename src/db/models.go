@@ -45,7 +45,9 @@ type Network struct {
 	// Cached here, as expensive to do COUNT(*) on Postgresql
 	GamesPlayed int
 
-	Elo float64
+	Elo    float64
+	Anchor bool
+	EloSet bool
 }
 
 type Match struct {
@@ -71,6 +73,8 @@ type Match struct {
 
 	// If true, this is not a promotion match
 	TestOnly bool
+	// If true, match is unusual so shouldn't be used for elo.
+	SpecialParams bool
 }
 
 type MatchGame struct {
