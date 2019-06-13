@@ -26,6 +26,7 @@ type TrainingRun struct {
 	Active          bool
 	LastNetwork     uint
 	LastGame        uint
+	PermissionExpr  string // Expression defined whether user is allowed to use this instance.
 }
 
 type Network struct {

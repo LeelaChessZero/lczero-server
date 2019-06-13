@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PaesslerAG/gval"
 	"github.com/gin-contrib/multitemplate"
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/go-version"
@@ -480,6 +481,35 @@ func checkEngineVersion(engineVersion string, username string) bool {
 	return v.Compare(target) >= 0
 }
 
+func checkPermissionExpr(expr string, user db.User, trainingRunId uint64, engineVersion string, clientVersion string) bool {
+	if expr == "" {
+		return true
+	}
+	v, err := version.NewVersion(engineVersion)
+	if err != nil {
+		return false
+	}
+	version, err := strconv.ParseUint(clientVersion, 10, 64)
+	if err != nil {
+		return false
+	}
+	value, err := gval.Evaluate(expr, map[string]interface{}{
+		"username":        user.Username,
+		"assigned_run_id": user.AssignedTrainingRunID,
+		"training_run":    trainingRunId,
+		"engine_suffix":   v.Prerelease(),
+		"engine_major":    v.Segments()[0],
+		"engine_minor":    v.Segments()[1],
+		"engine_patch":    v.Segments()[2],
+		"client_version":  version,
+	})
+	if err != nil {
+		log.Println("Invalid expression: ", expr)
+		return false
+	}
+	return value.(bool)
+}
+
 func uploadGame(c *gin.Context) {
 	user, version, err := checkUser(c)
 	if err != nil {
@@ -521,6 +551,12 @@ func uploadGame(c *gin.Context) {
 	if err != nil {
 		log.Println(err)
 		c.String(http.StatusBadRequest, "Invalid network")
+		return
+	}
+
+	if !checkPermissionExpr(training_run.PermissionExpr, *user, training_id, c.PostForm("engineVersion"), c.PostForm("version")) {
+		log.Println("Request doesn't match the expression: ", training_run.PermissionExpr)
+		c.String(http.StatusBadRequest, "Contribution to this training run is not allowed for this client.")
 		return
 	}
 
