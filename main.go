@@ -535,6 +535,12 @@ func uploadGame(c *gin.Context) {
 		return
 	}
 
+	if !checkPermissionExpr(training_run.PermissionExpr, *user, training_id, c.PostForm("engineVersion"), c.PostForm("version")) {
+		log.Println("Request doesn't match the expression: ", training_run.PermissionExpr)
+		c.String(http.StatusBadRequest, "Contribution to this training run is not allowed for this client.")
+		return
+	}
+
 	network_id, err := strconv.ParseUint(c.PostForm("network_id"), 10, 32)
 	if err != nil {
 		log.Println(err)
@@ -551,12 +557,6 @@ func uploadGame(c *gin.Context) {
 	if err != nil {
 		log.Println(err)
 		c.String(http.StatusBadRequest, "Invalid network")
-		return
-	}
-
-	if !checkPermissionExpr(training_run.PermissionExpr, *user, training_id, c.PostForm("engineVersion"), c.PostForm("version")) {
-		log.Println("Request doesn't match the expression: ", training_run.PermissionExpr)
-		c.String(http.StatusBadRequest, "Contribution to this training run is not allowed for this client.")
 		return
 	}
 
