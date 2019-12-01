@@ -1388,8 +1388,12 @@ func viewMatches(c *gin.Context) {
 	var err error
 	run := c.Param("run")
 	run = strings.TrimPrefix(run, "/")
-	if run == "" {
+	// 100 is a magic number used to limit initial page size
+	if run == "" || run == "100" {
 		err = db.GetDB().Order("id desc").Find(&matches).Error
+		if run == "100" {
+			matches := matches[0:99]
+		}
 	} else {
 		err = db.GetDB().Order("id desc").Where("training_run_id = ?", run).Find(&matches).Error
 	}
