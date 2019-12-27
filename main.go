@@ -1393,6 +1393,9 @@ func viewMatches(c *gin.Context) {
 	} else {
 		err = db.GetDB().Order("id desc").Where("training_run_id = ?", run).Find(&matches).Error
 	}
+	if c.DefaultQuery("show_all", "1") == "0" {
+		matches := matches[0:99]
+	}
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
