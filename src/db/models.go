@@ -14,6 +14,18 @@ type User struct {
 	AssignedTrainingRunID uint
 }
 
+type Client struct {
+	gorm.Model
+
+	User              User
+	UserID            uint `gorm:"index"`
+	ClientName        string
+	LastVersion       uint
+	LastEngineVersion string
+	LastGameAt        time.Time
+	GpuName           string
+}
+
 type TrainingRun struct {
 	gorm.Model
 
@@ -23,10 +35,12 @@ type TrainingRun struct {
 
 	Description     string
 	TrainParameters string
+	MatchParameters string
 	Active          bool
 	LastNetwork     uint
 	LastGame        uint
 	PermissionExpr  string // Expression defined whether user is allowed to use this instance.
+	MultiNetMode    bool
 }
 
 type Network struct {
@@ -76,6 +90,8 @@ type Match struct {
 	TestOnly bool
 	// If true, match is unusual so shouldn't be used for elo.
 	SpecialParams bool
+
+	TargetSlice int
 }
 
 type MatchGame struct {
@@ -102,6 +118,8 @@ type TrainingGame struct {
 
 	User          User
 	UserID        uint `gorm:"index"`
+	Client        Client
+	ClientID      uint `gorm:"index"`
 	TrainingRun   TrainingRun
 	TrainingRunID uint
 	Network       Network
@@ -111,7 +129,6 @@ type TrainingGame struct {
 	GameNumber uint
 
 	Version   uint
-	Path      string
 	Compacted bool
 
 	EngineVersion string

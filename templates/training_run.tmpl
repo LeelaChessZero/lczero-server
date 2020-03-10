@@ -52,7 +52,7 @@ var vlSpec = {
 					"field": "rating",
 					"type": "quantitative",
 					"axis": {
-						"title": "Elo rating (0 = random play)"
+						"title": "Elo rating (0 not standardized)"
 					},
 					"scale": {
 						"zero": false
@@ -68,7 +68,7 @@ var vlSpec = {
 		},
 		{
 			"transform": [
-				{ "filter": "datum.rating > -1" },
+				{ "filter": "datum.rating > -1000000" },
 				{ "calculate": "format(datum.net, ',d')", "as": "net_formatted" },
 				{ "calculate": "format(datum.rating, ',.2f')", "as": "rating_formatted" }
 			],
@@ -88,7 +88,7 @@ var vlSpec = {
 					"field": "rating",
 					"type": "quantitative",
 					"axis": {
-						"title": "Elo rating (0 = random play)"
+						"title": "Elo rating (0 not standardized)"
 					},
 					"scale": {
 						"zero": false
@@ -105,7 +105,7 @@ var vlSpec = {
 				"tooltip": [
 					{"type": "nominal", "field": "id", "title": "Network Number"},
 					{"type": "nominal", "field": "net_formatted", "title": "Number of trained games"},
-					{"type": "nominal", "field": "rating_formatted", "title": "Elo rating (0 = random play)"},
+					{"type": "nominal", "field": "rating_formatted", "title": "Elo rating (0 not standardized)"},
 					{"type": "nominal", "field": "sprt", "title": "SPRT"}
 				]
 			}

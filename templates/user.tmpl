@@ -4,17 +4,21 @@
   <table class="table table-striped table-sm">
     <thead>
       <tr>
-        <th>Id</th>
-        <th>Network</th>
-        <th>Created At</th>
+        <th>Client</th>
+        <th>Client Version</th>
+        <th>Engine Version</th>
+        <th>Last Game</th>
+        <th>GPU</th>
       </tr>
     </thead>
     <tbody>
-      {{range .games}}
+      {{range .clients}}
       <tr>
-        <td><a href="/game/{{.id}}">{{.id}}</a></td>
-        <td>{{.network}}</td>
-        <td>{{.created_at}}</td>
+        <td><a href="/client/{{.user}}/{{.client}}">{{.client_name}}</a></td>
+        <td>{{.client_version}}</td>
+        <td>{{.engine_version}}</td>
+        <td>{{.last_game}}</td>
+        <td>{{.client_gpu}}</td>
       </tr>
       {{end}}
     </tbody>

@@ -28,43 +28,64 @@ import (
 	"github.com/jinzhu/gorm"
 )
 
-func checkUser(c *gin.Context) (*db.User, uint64, error) {
+func checkUser(c *gin.Context) (*db.User, *db.Client, uint64, error) {
 	if len(c.PostForm("user")) == 0 {
-		return nil, 0, errors.New("No user supplied")
+		return nil, nil, 0, errors.New("No user supplied")
 	}
-	if len(c.PostForm("user")) > 32 {
-		return nil, 0, errors.New("Username too long")
+	splits := strings.SplitN(c.PostForm("user"), "/", 2)
+	userName := splits[0]
+	clientName := ""
+	if len(splits) == 2 {
+		clientName = splits[1]
+	}
+	if len(userName) > 32 {
+		return nil, nil, 0, errors.New("Username too long")
+	}
+	if len(clientName) > 126 {
+		return nil, nil, 0, errors.New("User client identifier too long")
+	}
+	if len(clientName) == 0 && len(c.PostForm("hostname")) != 0 {
+		clientName = c.PostForm("hostname") + "_" + c.PostForm("gpu_id")
 	}
 
 	user := &db.User{
 		Password: c.PostForm("password"),
 	}
-	err := db.GetDB().Where(db.User{Username: c.PostForm("user")}).FirstOrCreate(&user).Error
+	err := db.GetDB().Where(db.User{Username: userName}).FirstOrCreate(&user).Error
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
+	}
+	client := &db.Client{
+		UserID:     user.ID,
+		ClientName: clientName,
+		GpuName:    c.PostForm("gpu"),
+	}
+	err = db.GetDB().Where(db.Client{UserID: user.ID, ClientName: clientName}).FirstOrCreate(&client).Error
+	if err != nil {
+		return nil, nil, 0, err
 	}
 
 	// Ensure passwords match
 	if user.Password != c.PostForm("password") {
-		return nil, 0, errors.New("Incorrect password")
+		return nil, nil, 0, errors.New("Incorrect password")
 	}
 
 	version, err := strconv.ParseUint(c.PostForm("version"), 10, 64)
 	if err != nil {
-		return nil, 0, errors.New("Invalid version")
+		return nil, nil, 0, errors.New("Invalid version")
 	}
 	if version < config.Config.Clients.MinClientVersion {
 		log.Printf("Rejecting old game from %s, version %d\n", user.Username, version)
-		return nil, 0, errors.New("you must upgrade to a newer version")
+		return nil, nil, 0, errors.New("you must upgrade to a newer version")
 	}
 	if version < config.Config.Clients.NextClientVersion {
 		log.Printf("Would reject old game from %s, version %d with new threshold.\n", user.Username, version)
 	}
-	return user, version, nil
+	return user, client, version, nil
 }
 
 func nextGame(c *gin.Context) {
-	user, _, err := checkUser(c)
+	user, _, _, err := checkUser(c)
 	if err != nil {
 		log.Println(strings.TrimSpace(err.Error()))
 		c.String(http.StatusBadRequest, err.Error())
@@ -90,7 +111,7 @@ func nextGame(c *gin.Context) {
 		assignedID = user.AssignedTrainingRunID
 		// Balance unassigneds a bit.
 		if assignedID == 0 {
-			if token > 60000 {
+			if token >= 60000 {
 				assignedID = 2
 			}
 		}
@@ -122,7 +143,8 @@ func nextGame(c *gin.Context) {
 	var match []db.Match
 	// Skip matches on request
 	if !strings.Contains(c.PostForm("train_only"), "true") {
-		err = db.GetDB().Order("id").Preload("Candidate").Preload("CurrentBest").Where("done=false and training_run_id = ?", trainingRun.ID).Limit(1).Find(&match).Error
+		ourSlice := token%3 + 1
+		err = db.GetDB().Order("id").Preload("Candidate").Preload("CurrentBest").Where("done=false and training_run_id = ? and (target_slice = 0 or target_slice = ?)", trainingRun.ID, ourSlice).Limit(1).Find(&match).Error
 		if err != nil {
 			log.Println(err)
 			c.String(500, "Internal error 2")
@@ -156,16 +178,36 @@ func nextGame(c *gin.Context) {
 		c.JSON(http.StatusOK, result)
 		return
 	}
+	if trainingRun.MultiNetMode {
+		otherNetwork := network
+		offset := ((network.NetworkNumber * 33) ^ uint(token)) % 20
+		var prevNetwork db.Network
+		err = db.GetDB().Where("network_number = ?", network.NetworkNumber-offset).First(&prevNetwork).Error
+		if err == nil {
+			otherNetwork = prevNetwork
+		}
 
-	result := gin.H{
-		"type":       "train",
-		"trainingId": trainingRun.ID,
-		"networkId":  trainingRun.BestNetworkID,
-		"sha":        network.Sha,
-		"params":     trainingRun.TrainParameters,
-		"keepTime":   "16h",
+		result := gin.H{
+			"type":         "train",
+			"trainingId":   trainingRun.ID,
+			"networkId":    trainingRun.BestNetworkID,
+			"params":       trainingRun.TrainParameters,
+			"sha":          network.Sha,
+			"candidateSha": otherNetwork.Sha,
+			"keepTime":     "16h",
+		}
+		c.JSON(http.StatusOK, result)
+	} else {
+		result := gin.H{
+			"type":       "train",
+			"trainingId": trainingRun.ID,
+			"networkId":  trainingRun.BestNetworkID,
+			"params":     trainingRun.TrainParameters,
+			"sha":        network.Sha,
+			"keepTime":   "16h",
+		}
+		c.JSON(http.StatusOK, result)
 	}
-	c.JSON(http.StatusOK, result)
 }
 
 // Computes SHA256 of gzip compressed file
@@ -201,14 +243,19 @@ func getTrainingRun(trainingID uint) (*db.TrainingRun, error) {
 	return &trainingRun, nil
 }
 
-func createMatch(trainingRun *db.TrainingRun, network *db.Network, testonly bool, params string) error {
+func createMatch(trainingRun *db.TrainingRun, targetSlice int, network *db.Network, testonly bool, params string) error {
+	gameCap := config.Config.Matches.Games
+	if targetSlice == 0 {
+		gameCap *= 5
+	}
 	match := db.Match{
 		TrainingRunID: trainingRun.ID,
 		CandidateID:   network.ID,
 		CurrentBestID: trainingRun.BestNetworkID,
 		Done:          false,
-		GameCap:       config.Config.Matches.Games,
+		GameCap:       gameCap,
 		Parameters:    params,
+		TargetSlice:   targetSlice,
 	}
 	if testonly {
 		match.TestOnly = true
@@ -422,13 +469,17 @@ func uploadNetwork(c *gin.Context) {
 		}
 	}
 
-	// Create a match to see if this network is better
-	params, err := json.Marshal(config.Config.Matches.Parameters)
-	if err != nil {
-		log.Println(err)
-		c.String(500, "Internal error")
-		return
+	matchParams := trainingRun.MatchParameters
+	if matchParams == "" {
+		params, err := json.Marshal(config.Config.Matches.Parameters)
+		if err != nil {
+			log.Println(err)
+			c.String(500, "Internal error")
+			return
+		}
+		matchParams = string(params[:])
 	}
+	// Create a match to see if this network is better
 	var bestNetwork db.Network
 	err = db.GetDB().Where("id = ?", trainingRun.BestNetworkID).First(&bestNetwork).Error
 	if err != nil {
@@ -438,7 +489,7 @@ func uploadNetwork(c *gin.Context) {
 		return
 	}
 
-	err = createMatch(trainingRun, &network, c.DefaultPostForm("testonly", "0") == "1", string(params[:]))
+	err = createMatch(trainingRun, 1, &network, c.DefaultPostForm("testonly", "0") == "1", matchParams)
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
@@ -449,18 +500,39 @@ func uploadNetwork(c *gin.Context) {
 	var prevNetwork1 db.Network
 	err = db.GetDB().Where("network_number = ?", bestNetwork.NetworkNumber-3).First(&prevNetwork1).Error
 	if err == nil {
-		createMatch(trainingRun, &prevNetwork1, true, string(params[:]))
+		createMatch(trainingRun, 2, &prevNetwork1, true, matchParams)
 	}
 	var prevNetwork2 db.Network
 	err = db.GetDB().Where("network_number = ?", bestNetwork.NetworkNumber-10).First(&prevNetwork2).Error
 	if err == nil {
-		createMatch(trainingRun, &prevNetwork2, true, string(params[:]))
+		createMatch(trainingRun, 3, &prevNetwork2, true, matchParams)
+	}
+	if bestNetwork.NetworkNumber%15 == 0 {
+		var prevNetwork2 db.Network
+		err = db.GetDB().Where("network_number = ?", bestNetwork.NetworkNumber-30).First(&prevNetwork2).Error
+		if err == nil {
+			createMatch(trainingRun, 0, &prevNetwork2, true, matchParams)
+		}
+	}
+	if bestNetwork.NetworkNumber%25 == 0 {
+		var prevNetwork2 db.Network
+		err = db.GetDB().Where("network_number = ?", bestNetwork.NetworkNumber-100).First(&prevNetwork2).Error
+		if err == nil {
+			createMatch(trainingRun, 0, &prevNetwork2, true, matchParams)
+		}
+	}
+	if bestNetwork.NetworkNumber%75 == 0 {
+		var prevNetwork2 db.Network
+		err = db.GetDB().Where("network_number = ?", bestNetwork.NetworkNumber-300).First(&prevNetwork2).Error
+		if err == nil {
+			createMatch(trainingRun, 0, &prevNetwork2, true, matchParams)
+		}
 	}
 
 	c.String(http.StatusOK, fmt.Sprintf("Network %s uploaded successfully.", network.Sha))
 }
 
-func checkEngineVersion(engineVersion string, username string) bool {
+func checkEngineVersion(engineVersion string, username string, training_id uint) bool {
 	v, err := version.NewVersion(engineVersion)
 	if err != nil {
 		return false
@@ -468,6 +540,10 @@ func checkEngineVersion(engineVersion string, username string) bool {
 	target_soft, err := version.NewVersion(config.Config.Clients.NextEngineVersion)
 	if err != nil {
 		log.Println("Invalid comparison version, rejecting all clients!!!")
+		return false
+	}
+	if strings.HasSuffix(engineVersion, "-dev") {
+		log.Printf("%s is rejected for using dev version.", username)
 		return false
 	}
 	if v.Compare(target_soft) < 0 {
@@ -511,21 +587,25 @@ func checkPermissionExpr(expr string, user db.User, trainingRunId uint64, engine
 }
 
 func uploadGame(c *gin.Context) {
-	user, version, err := checkUser(c)
+	user, client, version, err := checkUser(c)
 	if err != nil {
 		log.Println(strings.TrimSpace(err.Error()))
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if !checkEngineVersion(c.PostForm("engineVersion"), user.Username) {
-		log.Printf("Rejecting game with old lczero version %s", c.PostForm("engineVersion"))
-		c.String(http.StatusBadRequest, "\n\n\n\n\nYou must upgrade to a newer lczero version!!\n\n\n\n\n")
-		return
-	}
+	client.LastVersion = uint(version)
+	client.LastEngineVersion = c.PostForm("engineVersion")
+	client.LastGameAt = time.Now()
+	client.GpuName = c.PostForm("gpu")
 	training_id, err := strconv.ParseUint(c.PostForm("training_id"), 10, 32)
 	if err != nil {
 		log.Println(err)
 		c.String(http.StatusBadRequest, "Invalid training_id")
+	}
+	if !checkEngineVersion(c.PostForm("engineVersion"), user.Username, uint(training_id)) {
+		log.Printf("Rejecting game with old lczero version %s", c.PostForm("engineVersion"))
+		c.String(http.StatusBadRequest, "\n\n\n\n\nYou must upgrade to a newer lczero version!!\n\n\n\n\n")
+		return
 	}
 
 	training_run, err := getTrainingRun(uint(training_id))
@@ -537,7 +617,7 @@ func uploadGame(c *gin.Context) {
 
 	if !checkPermissionExpr(training_run.PermissionExpr, *user, training_id, c.PostForm("engineVersion"), c.PostForm("version")) {
 		log.Println("Request doesn't match the expression: ", training_run.PermissionExpr)
-		c.String(http.StatusBadRequest, "Contribution to this training run is not allowed for this client.")
+		c.String(http.StatusBadRequest, "Contribution to this training run is not allowed for this client. (You need to upgrade or downgraded something.)")
 		return
 	}
 
@@ -604,6 +684,7 @@ func uploadGame(c *gin.Context) {
 	// Create new game
 	game := db.TrainingGame{
 		UserID:            user.ID,
+		ClientID:          client.ID,
 		TrainingRunID:     training_run.ID,
 		NetworkID:         network.ID,
 		Version:           uint(version),
@@ -617,18 +698,18 @@ func uploadGame(c *gin.Context) {
 		c.String(http.StatusBadRequest, "Internal error")
 		return
 	}
-
-	err = db.GetDB().Model(&game).Update("path", filepath.Join("games", fmt.Sprintf("run%d/training.%d.gz", training_run.ID, nextGameNumber))).Error
+	err = db.GetDB().Save(&client).Error
 	if err != nil {
+		// Only log error, not worth blocking uploads if this fails.
 		log.Println(err)
-		c.String(http.StatusBadRequest, "Internal error")
-		return
 	}
 
-	os.MkdirAll(filepath.Dir(game.Path), os.ModePerm)
+	game_path := filepath.Join("games", fmt.Sprintf("run%d/training.%d.gz", training_run.ID, nextGameNumber))
+
+	os.MkdirAll(filepath.Dir(game_path), os.ModePerm)
 
 	// Save the file
-	if err := c.SaveUploadedFile(file, game.Path); err != nil {
+	if err := c.SaveUploadedFile(file, game_path); err != nil {
 		log.Println(err.Error())
 		c.String(500, "Saving file")
 		return
@@ -732,18 +813,12 @@ func checkMatchFinished(match_id uint) error {
 }
 
 func matchResult(c *gin.Context) {
-	user, version, err := checkUser(c)
+	user, _, version, err := checkUser(c)
 	if err != nil {
 		log.Println(strings.TrimSpace(err.Error()))
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if !checkEngineVersion(c.PostForm("engineVersion"), user.Username) {
-		log.Printf("Rejecting game with old lczero version %s", c.PostForm("engineVersion"))
-		c.String(http.StatusBadRequest, "\n\n\n\n\nYou must upgrade to a newer lczero version!!\n\n\n\n\n")
-		return
-	}
-
 	match_game_id, err := strconv.ParseUint(c.PostForm("match_game_id"), 10, 32)
 	if err != nil {
 		log.Println(err)
@@ -756,6 +831,20 @@ func matchResult(c *gin.Context) {
 	if err != nil {
 		log.Println(err)
 		c.String(http.StatusBadRequest, "Invalid match_game")
+		return
+	}
+
+	var match db.Match
+	err = db.GetDB().Where("id = ?", match_game.MatchID).First(&match).Error
+	if err != nil {
+		log.Println(err)
+		c.String(http.StatusBadRequest, "Invalid match_game, no matching match.")
+		return
+	}
+
+	if !checkEngineVersion(c.PostForm("engineVersion"), user.Username, uint(match.TrainingRunID)) {
+		log.Printf("Rejecting game with old lczero version %s", c.PostForm("engineVersion"))
+		c.String(http.StatusBadRequest, "\n\n\n\n\nYou must upgrade to a newer lczero version!!\n\n\n\n\n")
 		return
 	}
 
@@ -812,7 +901,7 @@ func matchResult(c *gin.Context) {
 }
 
 func getActiveUsers(userLimit int) (gin.H, error) {
-	rows, err := db.GetDB().Raw(`SELECT user_id, username, MAX(version), MAX(SPLIT_PART(engine_version, '.', 2) :: INTEGER), MAX(training_games.created_at), count(*), assigned_training_run_id FROM training_games
+	rows, err := db.GetDB().Raw(`SELECT user_id, username, MAX(version), MAX(SPLIT_PART(engine_version, '.', 2) :: INTEGER), MAX(training_games.created_at), count(*), count(*) FILTER (WHERE training_run_id = 1) as count_run1, assigned_training_run_id FROM training_games
 LEFT JOIN users
 ON users.id = training_games.user_id
 WHERE training_games.created_at >= now() - INTERVAL '1 day'
@@ -833,8 +922,9 @@ ORDER BY count DESC`).Rows()
 		var engine_version string
 		var created_at time.Time
 		var count uint64
+		var count_run1 uint64
 		var assigned_training_run_id uint
-		rows.Scan(&user_id, &username, &version, &engine_version, &created_at, &count, &assigned_training_run_id)
+		rows.Scan(&user_id, &username, &version, &engine_version, &created_at, &count, &count_run1, &assigned_training_run_id)
 
 		active_users += 1
 		games_played += int(count)
@@ -847,6 +937,7 @@ ORDER BY count DESC`).Rows()
 			users_json = append(users_json, gin.H{
 				"user":                     username,
 				"games_today":              count,
+				"games_today_1":            count_run1,
 				"system":                   "",
 				"version":                  version,
 				"engine":                   engine_version,
@@ -952,9 +1043,11 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 	var count uint64 = 0
 	var elo float64 = 0.0
 	var matchIdx int = 0
+	firstNet := true
 	for _, network := range networks {
 		var sprt string = "???"
 		var best bool = false
+		eloResolved := false
 		for matchIdx < len(matches) && (matches[matchIdx].CandidateID == network.ID || matches[matchIdx].TestOnly) {
 			if matches[matchIdx].TestOnly && network.EloSet {
 				matchIdx += 1
@@ -991,10 +1084,28 @@ func getProgress(trainingRunID uint) ([]gin.H, map[uint]float64, error) {
 				"id":     network.NetworkNumber,
 				"anchor": network.Anchor,
 			})
+			eloResolved = true
 			matchIdx += 1
+		}
+		// Sometimes a network is never a candidate - especially true for anchors.
+		// Here create an output if that happens.
+		if !eloResolved && network.EloSet && !firstNet && network.Anchor {
+			result = append(result, gin.H{
+				"net":    count,
+				"rating": network.Elo,
+				"best":   network.Anchor,
+				"sprt":   "PASS",
+				"id":     network.NetworkNumber,
+				"anchor": network.Anchor,
+			})
+			elo = network.Elo
+		}
+		if counts[network.ID] == 0 {
+			count += 1
 		}
 		count += counts[network.ID]
 		elos[network.ID] = elo
+		firstNet = false
 	}
 
 	return result, elos, nil
@@ -1031,10 +1142,10 @@ func filterProgressToAnchor(result []gin.H) []gin.H {
 	return append(tmp, result...)
 }
 
-func filterProgress(result []gin.H) []gin.H {
-	// Show just the last 100 networks
-	if len(result) > 100 {
-		result = result[len(result)-100:]
+func filterProgress(result []gin.H, limit int) []gin.H {
+	// Show just the last limit networks
+	if len(result) > limit {
+		result = result[len(result)-limit:]
 	}
 
 	// Ensure the ordering is correct now (HACK)
@@ -1110,7 +1221,7 @@ func frontPage(c *gin.Context) {
 		return
 	}
 	if c.DefaultQuery("full_elo", "0") == "0" {
-		progress = filterProgress(progress)
+		progress = filterProgress(progress, 100)
 	}
 
 	// TODO: support showing other runs progress bar on front page?
@@ -1162,8 +1273,62 @@ func user(c *gin.Context) {
 		return
 	}
 
+	clients := []db.Client{}
+	err = db.GetDB().Model(&user).Order("created_at DESC").Related(&clients).Error
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return
+	}
+
+	clientJson := []gin.H{}
+	for _, client := range clients {
+		presentationName := client.ClientName
+		if len(presentationName) == 0 {
+			presentationName = "<default>"
+		}
+		clientJson = append(clientJson, gin.H{
+			"user":           user.Username,
+			"client":         client.ClientName,
+			"client_name":    presentationName,
+			"client_version": client.LastVersion,
+			"engine_version": client.LastEngineVersion,
+			"last_game":      client.LastGameAt.Format("2006-01-02 15:04:05 -07:00"),
+			"client_gpu":     client.GpuName,
+		})
+	}
+
+	c.HTML(http.StatusOK, "user", gin.H{
+		"user":    user.Username,
+		"clients": clientJson,
+	})
+}
+
+func client(c *gin.Context) {
+	name := c.Param("name")
+	user := db.User{
+		Username: name,
+	}
+	err := db.GetDB().Where(&user).First(&user).Error
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return
+	}
+	clientName := c.Param("client_name")
+	client := db.Client{
+		UserID:     user.ID,
+		ClientName: clientName,
+	}
+	err = db.GetDB().Where(&client).First(&client).Error
+	if err != nil {
+		log.Println(err)
+		c.String(500, "Internal error")
+		return
+	}
+
 	games := []db.TrainingGame{}
-	err = db.GetDB().Model(&user).Preload("Network").Limit(50).Order("created_at DESC").Related(&games).Error
+	err = db.GetDB().Model(&client).Preload("Network").Limit(50).Order("created_at DESC").Where("created_at > CURRENT_DATE - 2").Related(&games).Error
 	if err != nil {
 		log.Println(err)
 		c.String(500, "Internal error")
@@ -1179,9 +1344,10 @@ func user(c *gin.Context) {
 		})
 	}
 
-	c.HTML(http.StatusOK, "user", gin.H{
-		"user":  user.Username,
-		"games": gamesJson,
+	c.HTML(http.StatusOK, "client", gin.H{
+		"user":   user.Username,
+		"client": client.ClientName,
+		"games":  gamesJson,
 	})
 }
 
@@ -1284,6 +1450,9 @@ func viewNetworks(c *gin.Context) {
 
 	counts := getNetworkCounts(networks)
 	json := []gin.H{}
+	if c.DefaultQuery("show_all", "1") == "0" {
+		networks = networks[0:99]
+	}
 	for _, network := range networks {
 		json = append(json, gin.H{
 			"id":          network.ID,
@@ -1316,10 +1485,21 @@ func viewTrainingRuns(c *gin.Context) {
 
 	rows := []gin.H{}
 	for _, training_run := range training_runs {
+		match_params := training_run.MatchParameters
+		if match_params == "" {
+			params, err := json.Marshal(config.Config.Matches.Parameters)
+			if err != nil {
+				log.Println(err)
+				c.String(500, "Internal error")
+				return
+			}
+			match_params = string(params[:])
+		}
 		rows = append(rows, gin.H{
 			"id":          training_run.ID,
 			"active":      training_run.Active,
 			"trainParams": training_run.TrainParameters,
+			"matchParams": match_params,
 			"bestNetwork": training_run.BestNetwork.NetworkNumber,
 			"description": training_run.Description,
 		})
@@ -1345,8 +1525,12 @@ func viewTrainingRun(c *gin.Context) {
 		return
 	}
 	full := true
+	if c.DefaultQuery("show_less", "0") == "1" {
+		progress = filterProgress(progress, 50)
+		full = false
+	}
 	if c.DefaultQuery("full_elo", "0") == "0" {
-		progress = filterProgress(progress)
+		progress = filterProgress(progress, 100)
 		full = false
 	}
 	if c.DefaultQuery("to_last_anchor", "1") == "1" {
@@ -1394,7 +1578,7 @@ func viewMatches(c *gin.Context) {
 		err = db.GetDB().Order("id desc").Where("training_run_id = ?", run).Find(&matches).Error
 	}
 	if c.DefaultQuery("show_all", "1") == "0" {
-		matches := matches[0:99]
+		matches = matches[0:99]
 	}
 	if err != nil {
 		log.Println(err)
@@ -1431,6 +1615,8 @@ func viewMatches(c *gin.Context) {
 		if match.Done {
 			if match.Passed {
 				table_class = "success"
+			} else if match.SpecialParams {
+				table_class = "warning"
 			} else if match.TestOnly {
 				table_class = "info"
 			} else {
@@ -1560,6 +1746,7 @@ func createTemplates() multitemplate.Render {
 	r := multitemplate.New()
 	r.AddFromFiles("index", "templates/base.tmpl", "templates/index.tmpl")
 	r.AddFromFiles("user", "templates/base.tmpl", "templates/user.tmpl")
+	r.AddFromFiles("client", "templates/base.tmpl", "templates/client.tmpl")
 	r.AddFromFiles("game", "templates/base.tmpl", "templates/game.tmpl")
 	r.AddFromFiles("networks", "templates/base.tmpl", "templates/networks.tmpl")
 	r.AddFromFiles("training_runs", "templates/base.tmpl", "templates/training_runs.tmpl")
@@ -1585,6 +1772,8 @@ func setupRouter() *gin.Engine {
 	router.GET("/get_network", getNetwork)
 	router.GET("/cached/network/sha/:sha", cachedGetNetwork)
 	router.GET("/user/:name", user)
+	router.GET("/client/:name/:client_name", client)
+	router.GET("/client/:name", client)
 	router.GET("/game/:id", game)
 	router.GET("/networks/*run", viewNetworks)
 	router.GET("/stats", viewStats)
