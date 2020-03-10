@@ -111,7 +111,7 @@ func nextGame(c *gin.Context) {
 		assignedID = user.AssignedTrainingRunID
 		// Balance unassigneds a bit.
 		if assignedID == 0 {
-			if token >= 152000 {
+			if token >= 60000 {
 				assignedID = 2
 			}
 		}
@@ -533,9 +533,6 @@ func uploadNetwork(c *gin.Context) {
 }
 
 func checkEngineVersion(engineVersion string, username string, training_id uint) bool {
-	if training_id == 3 {
-		return true
-	}
 	v, err := version.NewVersion(engineVersion)
 	if err != nil {
 		return false
@@ -546,9 +543,6 @@ func checkEngineVersion(engineVersion string, username string, training_id uint)
 		return false
 	}
 	if strings.HasSuffix(engineVersion, "-dev") {
-		if username == "Teststuff" {
-			return true
-		}
 		log.Printf("%s is rejected for using dev version.", username)
 		return false
 	}
