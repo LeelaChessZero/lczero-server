@@ -31,6 +31,7 @@ func Init() {
 // SetupDB setups DB.
 func SetupDB() {
 	db.AutoMigrate(&User{})
+	db.AutoMigrate(&Client{})
 	db.AutoMigrate(&TrainingRun{})
 	db.AutoMigrate(&Network{})
 	db.AutoMigrate(&Match{})

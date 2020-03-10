@@ -1,8 +1,9 @@
 {{define "content"}}
 <div class="alert alert-primary" role="alert">
-  This is the testing instance of LCZero server.<br>
-  Here we pretend to test things but sometimes actually run things to completion.<br>
-  We have started another major run that aims to demonstrate a lot of what we have learnt so far, rather than being subject to continual tweaks. Main page will show its progress. Other test runs can be seen under the training runs section.<br>
+  This is the testing instance of LCZero server. It is also the only instance.<br>
+  Here we pretend to test things out, but sometimes we just make the strongest publicly available chess playing neural net by accident.<br>
+  The current main test is to see whether we can train a much larger net to improve even further on our previous best..
+  <br>
   You can get the <a href="https://github.com/LeelaChessZero/lczero-client/releases">client</a> and <a href="https://github.com/LeelaChessZero/lc0/releases">lc0</a> releases from those links.
 </div>
 
@@ -69,14 +70,14 @@
 	  <thead>
 	    <tr>
 	      <th>User</th>
-	      <th>Games / Day</th>
+	      <th>Games / Day All Runs (Run 1)</th>
 	    </tr>
 	  </thead>
 	  <tbody>
 	    {{range .top_users_day}}
 	    <tr>
 	      <td><a href="/user/{{.user}}">{{.user}}</a></td>
-	      <td>{{.games_today}}</td>
+	      <td>{{.games_today}} ({{.games_today_1}})</td>
 	    </tr>
 	    {{end}}
 	  </tbody>
@@ -170,7 +171,7 @@ var vlSpec = {
 					"field": "rating",
 					"type": "quantitative",
 					"axis": {
-						"title": "Elo rating (0 = random play)"
+						"title": "Elo rating (0 not standardized)"
 					},
 					"scale": {
 						"zero": false
@@ -186,7 +187,7 @@ var vlSpec = {
 		},
 		{
 			"transform": [
-				{ "filter": "datum.rating > -1" },
+				{ "filter": "datum.rating > -1000000" },
 				{ "calculate": "format(datum.net, ',d')", "as": "net_formatted" },
 				{ "calculate": "format(datum.rating, ',.2f')", "as": "rating_formatted" }
 			],
@@ -206,7 +207,7 @@ var vlSpec = {
 					"field": "rating",
 					"type": "quantitative",
 					"axis": {
-						"title": "Elo rating (0 = random play)"
+						"title": "Elo rating (0 not standardized)"
 					},
 					"scale": {
 						"zero": false
@@ -223,7 +224,7 @@ var vlSpec = {
 				"tooltip": [
 					{"type": "nominal", "field": "id", "title": "Network Id"},
 					{"type": "nominal", "field": "net_formatted", "title": "Number of trained games"},
-					{"type": "nominal", "field": "rating_formatted", "title": "Elo rating (0 = random play)"},
+					{"type": "nominal", "field": "rating_formatted", "title": "Elo rating (0 not standardized)"},
 					{"type": "nominal", "field": "sprt", "title": "SPRT"}
 				]
 			}

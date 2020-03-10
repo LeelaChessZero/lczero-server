@@ -49,12 +49,16 @@ func prepareMatches() {
 	}
 	os.MkdirAll("match_pgns", os.ModePerm)
 	log.Println("Starting matches")
+	var ordoScript strings.Builder
+	ordoScript.WriteString("#!/bin/bash\n\n")
+	ordoScript.WriteString("rm match_pgns/output.csv\n")
 	for i := range matches {
 		match := matches[i]
 		if !match.Done || match.SpecialParams {
 			continue
 		}
-		filename := "match_pgns/" + strconv.Itoa(int(match.TrainingRunID)) + "/" + strconv.Itoa(int(match.ID)) + ".pgn"
+		namePart := strconv.Itoa(int(match.TrainingRunID)) + "/" + strconv.Itoa(int(match.ID)) + ".pgn"
+		filename := "match_pgns/" + namePart
 		searchTarget := networkNums[match.CurrentBestID]
 		possibleAnchors := anchors[match.TrainingRunID]
 		anchorIdx := sort.Search(len(possibleAnchors), func(j int) bool { return possibleAnchors[j] > searchTarget }) - 1
@@ -113,10 +117,8 @@ func prepareMatches() {
 		if err != nil {
 			return
 		}
+		ordoScript.WriteString("scripts/adjudicate.py --pgn match_pgns/" + namePart + " --output match_pgns/adj/" + namePart + " --syzygy /home/lc0/syzygy/3-4-5/:/home/lc0/syzygy/6-WDL/\n")
 	}
-	var ordoScript strings.Builder
-	ordoScript.WriteString("#!/bin/bash\n\n")
-	ordoScript.WriteString("rm match_pgns/output.csv\n")
 	for run, _ := range anchors {
 		for i, enabled := range anchorsNew[run] {
 			if !enabled {
