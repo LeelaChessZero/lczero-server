@@ -1,15 +1,15 @@
 {
   "database": {
     "host": "localhost",
-    "user": "gorm",
-    "dbname": "gorm",
-    "password": "gorm"
+    "user": "lc0",
+    "dbname": "lc0",
+    "password": "lc0pass"
   },
   "clients": {
-    "minClientVersion": 18,
-    "nextClientVersion": 20,
-    "minEngineVersion": "v0.20.1-rc3",
-    "nextEngineVersion": "v0.20.1"
+    "minClientVersion": 25,
+    "nextClientVersion": 25,
+    "minEngineVersion": "v0.24.0",
+    "nextEngineVersion": "v0.24.0"
   },
   "urls": {
     "onNewNetwork": [],
@@ -17,11 +17,11 @@
     "backupNetworkLocation": "http://data.lczero.org/files/networks/"
   }, 
   "matches": {
-    "games": 400,
-    "parameters": ["--tempdecay-moves=20", "--temperature=1", "--cpuct=2.5", "--fpu-reduction=0.0", "--policy-softmax-temp=1.0", "--noise=true", "--minibatch-size=256", "--out-of-order-eval=true", "--max-collision-visits=9999", "--max-collision-events=32", "--cache-history-length=0", "--smart-pruning-factor=1.33"],
-    "threshold": -100.0
+    "games": 600,
+    "parameters": ["--tempdecay-moves=20", "--temperature=2", "--temp-visit-offset=-8", "--cpuct=2.5", "--policy-softmax-temp=1.0", "--noise=true", "--minibatch-size=256", "--out-of-order-eval=true", "--max-collision-visits=9999", "--max-collision-events=32", "--cache-history-length=0", "--smart-pruning-factor=1.33"],
+    "threshold": -50.0
   },
   "webserver": {
-    "address": ":8080"
+    "address": ":9830"
   }
 }

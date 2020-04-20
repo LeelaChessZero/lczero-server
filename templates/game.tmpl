@@ -1,25 +1,25 @@
 {{define "content"}}
-<!-- Support libraries from Yahoo YUI project -->  
-<script type="text/javascript" src="http://chesstempo.com/js/pgnyui.js"></script>
-<script type="text/javascript" src="http://chesstempo.com/js/pgnviewer.js"></script>
-<link type="text/css" rel="stylesheet" href="http://chesstempo.com/css/board-min.css"></link>
-
-<script>
-new PgnViewer(
-  { boardName: "training",
-    pgnString: '{{.pgn}}',
-    pieceSet: 'merida',
-    pieceSize: 55
-  }
-);
-</script>
-
-<div id="training-container"></div>  
-<div id="training-moves"></div>
-<div>
-Thanks to <a href="http://chesstempo.com">http://chesstempo.com</a> for the board viewer!
-</div>
+<form style="display: none;"><textarea style="display: none;" id="pgnText">
+{{.pgn}}
+</textarea></form>
+<div id="GameBoard"></div>
+<div id="GameButtons"></div>
+<div id="GameText"></div> 
 {{end}}
 
 {{define "scripts"}}
+<style type="text/css">
+
+.moveOn,
+.variationOn {
+  background: #DAF4D7;
+}
+
+</style>
+<script type="text/javascript" src="/js/pgn4web.js"></script>
+<script type="text/javascript">
+SetImagePath("/images");
+SetHighlightOption(true)
+SetShortcutKeysEnabled(true);
+</script>
 {{end}}

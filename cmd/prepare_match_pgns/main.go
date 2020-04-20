@@ -111,6 +111,10 @@ func prepareMatches() {
 			str.WriteString("[White \"lc0.net." + strconv.Itoa(int(first)) + "\"]\n")
 			str.WriteString("[Black \"lc0.net." + strconv.Itoa(int(second)) + "\"]\n")
 			str.WriteString("[Result \"" + result + "\"]\n")
+			// If its a FEN start, specifiy variant chess960 to avoid python-chess assuming its not chess960 even though the fen isn't a legal position for normal chess.
+			if strings.HasPrefix(game.Pgn, "[FEN ") {
+				str.WriteString("[Variant \"chess960\"]\n")
+			}
 			str.WriteString(game.Pgn + "\n\n")
 		}
 		err = ioutil.WriteFile(filename, []byte(str.String()), 0644)

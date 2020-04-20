@@ -111,7 +111,7 @@ func nextGame(c *gin.Context) {
 		assignedID = user.AssignedTrainingRunID
 		// Balance unassigneds a bit.
 		if assignedID == 0 {
-			if token >= 60000 {
+			if token >= 152000 {
 				assignedID = 2
 			}
 		}
@@ -173,6 +173,7 @@ func nextGame(c *gin.Context) {
 			"sha":          match[0].CurrentBest.Sha,
 			"candidateSha": match[0].Candidate.Sha,
 			"params":       match[0].Parameters,
+			"bookUrl":      trainingRun.MatchBook,
 			"flip":         flip,
 		}
 		c.JSON(http.StatusOK, result)
@@ -194,6 +195,7 @@ func nextGame(c *gin.Context) {
 			"params":       trainingRun.TrainParameters,
 			"sha":          network.Sha,
 			"candidateSha": otherNetwork.Sha,
+			"bookUrl":      trainingRun.TrainBook,
 			"keepTime":     "16h",
 		}
 		c.JSON(http.StatusOK, result)
@@ -204,6 +206,7 @@ func nextGame(c *gin.Context) {
 			"networkId":  trainingRun.BestNetworkID,
 			"params":     trainingRun.TrainParameters,
 			"sha":        network.Sha,
+			"bookUrl":    trainingRun.TrainBook,
 			"keepTime":   "16h",
 		}
 		c.JSON(http.StatusOK, result)
@@ -533,6 +536,9 @@ func uploadNetwork(c *gin.Context) {
 }
 
 func checkEngineVersion(engineVersion string, username string, training_id uint) bool {
+	if training_id == 3 {
+		return true
+	}
 	v, err := version.NewVersion(engineVersion)
 	if err != nil {
 		return false
@@ -543,6 +549,9 @@ func checkEngineVersion(engineVersion string, username string, training_id uint)
 		return false
 	}
 	if strings.HasSuffix(engineVersion, "-dev") {
+		if username == "Teststuff" {
+			return true
+		}
 		log.Printf("%s is rejected for using dev version.", username)
 		return false
 	}
@@ -1766,6 +1775,7 @@ func setupRouter() *gin.Engine {
 	router.MaxMultipartMemory = 32 << 20 // 32 MiB
 	router.Static("/css", "./public/css")
 	router.Static("/js", "./public/js")
+	router.Static("/images", "./public/images")
 	router.Static("/stats", "./netstats")
 
 	router.GET("/", frontPage)

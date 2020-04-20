@@ -36,6 +36,8 @@ type TrainingRun struct {
 	Description     string
 	TrainParameters string
 	MatchParameters string
+	TrainBook       string
+	MatchBook       string
 	Active          bool
 	LastNetwork     uint
 	LastGame        uint
