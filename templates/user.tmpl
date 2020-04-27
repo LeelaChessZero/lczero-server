@@ -1,9 +1,25 @@
 {{define "content"}}
+<script>
+  function status(t) {
+    p = document.currentScript.parentElement;
+    dt = new Date - new Date(t.substring(0, 19) + 'Z');
+    if (dt < 900000) {
+      p.style.color = 'green';
+      p.textContent = '\u2713';
+    } else if (dt < 172800000) {
+      p.style.color = 'red';
+      p.textContent = '\u2a2f';
+    } else 
+      p.textContent = '\u2043';
+    p.style.textAlign = 'center';
+  }
+</script>
 <h2>User {{.user}}</h2>
 <div class="table-responsive">
   <table class="table table-striped table-sm">
     <thead>
       <tr>
+        <th>Status</th>
         <th>Client</th>
         <th>Client Version</th>
         <th>Engine Version</th>
@@ -14,6 +30,7 @@
     <tbody>
       {{range .clients}}
       <tr>
+        <td><script>status('{{.last_game}}')</script></td>
         <td><a href="/client/{{.user}}/{{.client}}">{{.client_name}}</a></td>
         <td>{{.client_version}}</td>
         <td>{{.engine_version}}</td>
