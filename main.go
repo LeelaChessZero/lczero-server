@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/go-version"
 	"github.com/jinzhu/gorm"
+	"github.com/notnil/chess"
 )
 
 func checkUser(c *gin.Context) (*db.User, *db.Client, uint64, error) {
