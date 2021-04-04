@@ -18,6 +18,7 @@ var Config struct {
 		NextClientVersion uint64
 		MinEngineVersion  string
 		NextEngineVersion string
+		VerifyPgns        bool
 	}
 	URLs struct {
 		OnNewNetwork          []string
