@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hashicorp/go-version"
 	"github.com/jinzhu/gorm"
+	"github.com/notnil/chess"
 )
 
 func checkUser(c *gin.Context) (*db.User, *db.Client, uint64, error) {
@@ -595,6 +596,20 @@ func checkPermissionExpr(expr string, user db.User, trainingRunId uint64, engine
 	return value.(bool)
 }
 
+func validatePgn(file string) error {
+	data, err := os.Open(file)
+	if err != nil {
+		log.Println("readfile error in file %v", file)
+		log.Println(err)
+		return err
+	}
+
+	pgn, err := chess.PGN(data)
+	if pgn != nil {}
+
+	return err
+}
+
 func uploadGame(c *gin.Context) {
 	user, client, version, err := checkUser(c)
 	if err != nil {
@@ -722,6 +737,15 @@ func uploadGame(c *gin.Context) {
 		log.Println(err.Error())
 		c.String(500, "Saving file")
 		return
+	}
+
+	if config.Config.Clients.VerifyPgns {
+		parsingErr := validatePgn(game_path)
+		if parsingErr != nil {
+			fmt.Println("corrupt pgn file exited with error: %v", parsingErr)
+			c.String(500, "internal error")
+			return 
+		}
 	}
 
 	// Save pgn
