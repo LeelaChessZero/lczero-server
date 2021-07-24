@@ -733,6 +733,21 @@ func uploadGame(c *gin.Context) {
 		c.String(500, "Saving pgn")
 		return
 	}
+	// Save resign rate
+        s := fmt.Sprintf("%f", resign_fp_threshold)
+        if (s == "-1.000000") {
+                return 
+        } else {
+                resign_path := fmt.Sprintf("resign/run%d/%d.txt", training_run.ID, nextGameNumber)
+                os.MkdirAll(filepath.Dir(resign_path), os.ModePerm)
+                err = ioutil.WriteFile(resign_path, []byte(s), 0644)
+                if err != nil {
+                        log.Println(err.Error())
+                        c.String(500, "Saving resign file")
+                        return
+                        }
+                }
+
 
 	c.String(http.StatusOK, fmt.Sprintf("File %s uploaded successfully with fields user=%s.", file.Filename, user.Username))
 }
